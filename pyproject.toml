@@ -1,0 +1,113 @@
+[project]
+name = "fastapi-microservices-platform"
+version = "1.0.0"
+description = "Platform foundation for the FastAPI Microservices Platform monorepo."
+requires-python = ">=3.14,<3.15"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "FastAPI Microservices Platform" }]
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28.1,<0.29",
+  "jsonschema>=4.26,<5",
+  "mypy>=1.17,<2",
+  "pip-audit==2.10.1",
+  "pytest>=9.0.3,<10",
+  "ruff>=0.14,<0.15",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.uv.workspace]
+members = [
+  "services/catalog-service",
+  "services/search-service",
+  "services/cart-service",
+  "services/media-service",
+  "services/inventory-service",
+  "services/order-service",
+  "services/payment-service",
+  "services/notification-service",
+  "libs/platform-observability",
+  "libs/platform-auth",
+  "libs/platform-messaging",
+  "services/customer-service",
+  "services/identity-service",
+  "services/reference-service",
+  "services/chat-service",
+  "services/shipping-service",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = [
+  "libs/platform-auth/src",
+  "libs/platform-observability/src",
+  "libs/platform-messaging/src",
+  "services/catalog-service/src",
+  "services/cart-service/src",
+  "services/media-service/src",
+  "services/inventory-service/src",
+  "services/order-service/src",
+  "services/payment-service/src",
+  "services/notification-service/src",
+  "services/reference-service/src",
+  "services/identity-service/src",
+  "services/customer-service/src",
+  "services/chat-service/src",
+  "services/shipping-service/src",
+  "tests",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = [
+  "libs/platform-auth/tests",
+  "libs/platform-observability/tests",
+  "libs/platform-messaging/tests",
+  "services/catalog-service/tests",
+  "services/cart-service/tests",
+  "services/media-service/tests",
+  "services/inventory-service/tests",
+  "services/order-service/tests",
+  "services/payment-service/tests",
+  "services/notification-service/tests",
+  "services/reference-service/tests",
+  "services/identity-service/tests",
+  "services/customer-service/tests",
+  "services/chat-service/tests",
+  "services/shipping-service/tests",
+  "tests",
+]
+addopts = "-ra --import-mode=importlib"
+markers = [
+  "e2e: requires an explicitly started platform topology and is opt-in",
+]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = [
+  "libs/platform-auth/src",
+  "libs/platform-observability/src",
+  "libs/platform-messaging/src",
+  "services/catalog-service/src",
+  "services/cart-service/src",
+  "services/media-service/src",
+  "services/inventory-service/src",
+  "services/order-service/src",
+  "services/payment-service/src",
+  "services/notification-service/src",
+  "services/reference-service/src",
+  "services/identity-service/src",
+  "services/customer-service/src",
+  "services/chat-service/src",
+  "services/shipping-service/src",
+]

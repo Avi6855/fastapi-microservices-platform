@@ -1,0 +1,77 @@
+# Event Catalogue and Policy
+
+The machine-readable registry is [`contracts/catalog.json`](../../contracts/catalog.json). The canonical domain-event envelope is [`event-envelope.v1.schema.json`](../../contracts/events/event-envelope.v1.schema.json). Technical Kafka delivery failures use the separate [`kafka.dead_letter.v1.schema.json`](../../contracts/events/kafka.dead_letter.v1.schema.json) contract.
+
+## Naming
+
+Event names use lower-case past-tense domain facts with an explicit schema version:
+
+```text
+<aggregate-or-concept>.<fact>.v<version>
+```
+
+Examples:
+
+- `order.created.v1`
+- `inventory.reserved.v1`
+- `inventory.reservation_failed.v1`
+- `payment.succeeded.v1`
+- `payment.refunded.v1`
+- `media.ready.v1`
+
+Commands and Celery task names are not domain events.
+
+## Checkout Saga events
+
+| Event | Owner | Expected consumers | Phase |
+|---|---|---|---|
+| `order.created.v1` | Order | Inventory | 5 |
+| `inventory.reserved.v1` | Inventory | Order, Payment | 5 |
+| `inventory.reservation_failed.v1` | Inventory | Order | 5 |
+| `payment.processing.v1` | Payment | Order | 5 |
+| `payment.succeeded.v1` | Payment | Order, Inventory | 5 |
+| `payment.failed.v1` | Payment | Order, Inventory | 5 |
+| `order.confirmed.v1` | Order | Future invoice dispatcher | 5 |
+| `order.refund_requested.v1` | Order | Payment | 7 |
+| `payment.refunded.v1` | Payment | Order, Inventory | 7 |
+| `payment.refund_failed.v1` | Payment | Order | 7 |
+| `order.fulfillment_updated.v1` | Order | Future projections | 7 |
+| `product.created.v1` | Catalog | Search | 8 |
+| `product.updated.v1` | Catalog | Search | 8 |
+| `product.deleted.v1` | Catalog | Search | 8 |
+
+## Reserved events
+
+| Event | Owner | Expected consumers | Phase |
+|---|---|---|---|
+| `invoice.generated.v1` | Order | Notification | 6 |
+| `media.ready.v1` | Media | Asset-owning contexts | 3+
+
+Reserved names are architecture vocabulary whose payload contracts are unavailable until the owning phase designs aggregates, authorization, idempotency, privacy, and consumer needs.
+
+## Compatibility and retirement
+
+- A breaking payload or semantic change creates a new `.vN` event.
+- Compatible additive changes remain optional for older consumers.
+- Producers and consumers document a migration window before retirement.
+- Replayed historical records remain valid under the schema version they were written with.
+- Topic migration is a separate concern from event schema versioning.
+
+## Operational requirements
+
+Each active event documents:
+
+- owner and consumers;
+- topic and message key;
+- delivery and ordering semantics;
+- required consumer idempotency key;
+- data classification;
+- retry and DLQ owner;
+- produced/consumed metrics;
+- compatibility and retirement policy;
+- related ADR and runbook.
+
+`kafka.dead_letter.v1` is not a domain fact. It records a consumer failure after
+bounded retries, preserves raw source bytes and headers, and is keyed by source
+`topic:partition:offset`. Its owner is platform engineering; recovery follows
+the [Kafka DLQ runbook](../runbooks/kafka-dlq.md).

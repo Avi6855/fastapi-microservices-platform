@@ -1,0 +1,534 @@
+name: Platform CI and Delivery
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality, contracts, and dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install verified kubectl v1.36.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=v1.36.1
+          curl --fail --location --retry 3 --output kubectl "https://dl.k8s.io/release/${version}/bin/linux/amd64/kubectl"
+          curl --fail --location --retry 3 --output kubectl.sha256 "https://dl.k8s.io/release/${version}/bin/linux/amd64/kubectl.sha256"
+          echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+          mkdir --parents "$HOME/.local/bin"
+          install --mode=0755 kubectl "$HOME/.local/bin/kubectl"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          kubectl version --client
+
+      - name: Install verified Helm v4.2.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm_tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$helm_tmp_dir"' EXIT
+          archive_name=helm-v4.2.4-linux-amd64.tar.gz
+          archive="$helm_tmp_dir/$archive_name"
+          curl --fail --location --retry 3 --output "$archive" "https://get.helm.sh/$archive_name"
+          echo "c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3  $archive" | sha256sum --check
+          tar --extract --gzip --file "$archive" --directory "$helm_tmp_dir"
+          install --mode=0755 "$helm_tmp_dir/linux-amd64/helm" "$HOME/.local/bin/helm"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          helm version
+
+      - name: Set up CPython 3.14.7
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14.7"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.5"
+          enable-cache: true
+
+      - name: Sync locked workspace
+        run: uv sync --locked --all-packages
+
+      - name: Validate repository architecture and contracts
+        shell: pwsh
+        run: ./scripts/validate_phase0.ps1
+
+      - name: Render Kubernetes resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl kustomize infrastructure/kubernetes/foundation >/dev/null
+          kubectl kustomize infrastructure/kubernetes/migrations >/dev/null
+          kubectl kustomize infrastructure/kubernetes/workloads >/dev/null
+          kubectl kustomize infrastructure/kubernetes/conformance/foundation >/dev/null
+          kubectl kustomize infrastructure/kubernetes/conformance/migrations >/dev/null
+          kubectl kustomize infrastructure/kubernetes/conformance/workloads >/dev/null
+          kubectl kustomize infrastructure/kubernetes/conformance/smoke >/dev/null
+          kubectl kustomize infrastructure/kubernetes/conformance/e2e >/dev/null
+          helm lint infrastructure/helm/fastapi-platform-foundation --strict --values infrastructure/helm/fastapi-platform-foundation/values-conformance.yaml
+          helm lint infrastructure/helm/fastapi-platform --strict --values infrastructure/helm/fastapi-platform/values-conformance.yaml
+          helm template platform-foundation infrastructure/helm/fastapi-platform-foundation --namespace fastapi-platform --values infrastructure/helm/fastapi-platform-foundation/values-conformance.yaml >/dev/null
+          helm template fastapi-platform infrastructure/helm/fastapi-platform --namespace fastapi-platform --values infrastructure/helm/fastapi-platform/values-conformance.yaml >/dev/null
+          if helm template fastapi-platform infrastructure/helm/fastapi-platform --namespace fastapi-platform >/tmp/helm-default-render.out 2>&1; then
+            echo "The delivery chart rendered without immutable image digests." >&2
+            exit 1
+          fi
+          grep --fixed-strings "immutable release digest" /tmp/helm-default-render.out >/dev/null
+
+      - name: Validate lock, formatting, linting, typing, and unit tests
+        run: |
+          uv lock --check
+          uv run --all-packages ruff format --check .
+          uv run --all-packages ruff check .
+          uv run --all-packages mypy
+          uv run --all-packages pytest -m "not e2e"
+
+      - name: Audit locked Python dependencies
+        run: uv run pip-audit --skip-editable
+
+      - name: Validate Docker Compose model
+        run: docker compose -f infrastructure/compose/docker-compose.yml config --quiet
+
+  migration-heads:
+    name: Validate service migration heads
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up CPython 3.14.7
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14.7"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.5"
+          enable-cache: true
+
+      - name: Sync locked workspace
+        run: uv sync --locked --all-packages
+
+      - name: Require one migration head per executable service
+        shell: bash
+        run: |
+          set -euo pipefail
+          for service in identity-service customer-service catalog-service search-service media-service inventory-service cart-service order-service payment-service shipping-service notification-service chat-service; do
+            heads="$(uv run --package "$service" alembic -c "services/$service/alembic.ini" heads)"
+            test "$(printf '%s\n' "$heads" | sed '/^$/d' | wc -l)" -eq 1
+            printf '%s: %s\n' "$service" "$heads"
+          done
+
+  image-build:
+    name: Build ${{ matrix.service }} image
+    if: github.event_name == 'pull_request'
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - reference-service
+          - identity-service
+          - customer-service
+          - catalog-service
+          - search-service
+          - media-service
+          - inventory-service
+          - cart-service
+          - order-service
+          - payment-service
+          - shipping-service
+          - notification-service
+          - chat-service
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build independently deployable image
+        run: |
+          docker build \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --file "services/${{ matrix.service }}/Dockerfile" \
+            --tag "local/${{ matrix.service }}:${{ github.sha }}" \
+            .
+
+      - name: Scan image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/${{ matrix.service }}:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+  edge-image:
+    name: Scan Nginx edge image
+    if: github.event_name == 'pull_request'
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Pull pinned Nginx edge image
+        run: docker pull nginx:1.30.4-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
+
+      - name: Scan edge image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: nginx:1.30.4-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+  integration:
+    name: Platform integration workflows
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up CPython 3.14.7
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14.7"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.5"
+          enable-cache: true
+
+      - name: Sync locked workspace
+        run: uv sync --locked --all-packages
+
+      - name: Start real platform infrastructure
+        run: >
+          docker compose -f infrastructure/compose/docker-compose.yml up -d --build --wait
+          postgres kafka rabbitmq redis minio mailpit
+
+      - name: Run service-owned migrations
+        run: |
+          uv run --package identity-service alembic -c services/identity-service/alembic.ini upgrade head
+          uv run --package customer-service alembic -c services/customer-service/alembic.ini upgrade head
+          uv run --package catalog-service alembic -c services/catalog-service/alembic.ini upgrade head
+          uv run --package search-service alembic -c services/search-service/alembic.ini upgrade head
+          uv run --package media-service alembic -c services/media-service/alembic.ini upgrade head
+          uv run --package inventory-service alembic -c services/inventory-service/alembic.ini upgrade head
+          uv run --package cart-service alembic -c services/cart-service/alembic.ini upgrade head
+          uv run --package order-service alembic -c services/order-service/alembic.ini upgrade head
+          uv run --package payment-service alembic -c services/payment-service/alembic.ini upgrade head
+          uv run --package shipping-service alembic -c services/shipping-service/alembic.ini upgrade head
+          uv run --package notification-service alembic -c services/notification-service/alembic.ini upgrade head
+          uv run --package chat-service alembic -c services/chat-service/alembic.ini upgrade head
+
+      - name: Generate local edge TLS certificate
+        shell: pwsh
+        run: ./scripts/new_local_edge_certificate.ps1
+
+      - name: Start migrated APIs, workers, and edge
+        run: docker compose -f infrastructure/compose/docker-compose.yml up -d --build --wait
+
+      - name: Execute cross-service and resilience E2E workflows
+        run: RUN_E2E=1 E2E_BASE_URL=https://127.0.0.1 uv run --all-packages pytest tests/e2e/test_phase4_customer_cart.py tests/e2e/test_phase6_checkout_notification.py tests/e2e/test_phase7_realtime_chat.py tests/e2e/test_phase8_search.py tests/e2e/test_phase12_resilience.py tests/e2e/test_edge_gateway.py tests/e2e/test_phase18_shipping.py tests/e2e/test_phase19_returns.py -q
+
+      - name: Collect Compose logs on failure
+        if: failure()
+        run: docker compose -f infrastructure/compose/docker-compose.yml logs --no-color
+
+      - name: Stop integration platform
+        if: always()
+        run: docker compose -f infrastructure/compose/docker-compose.yml down --volumes --remove-orphans
+
+  kubernetes-conformance:
+    name: Kubernetes Kind conformance
+    if: github.event_name != 'pull_request'
+    needs:
+      - quality
+      - migration-heads
+      - integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install verified kubectl v1.36.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=v1.36.1
+          curl --fail --location --retry 3 --output kubectl "https://dl.k8s.io/release/${version}/bin/linux/amd64/kubectl"
+          curl --fail --location --retry 3 --output kubectl.sha256 "https://dl.k8s.io/release/${version}/bin/linux/amd64/kubectl.sha256"
+          echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+          mkdir --parents "$HOME/.local/bin"
+          install --mode=0755 kubectl "$HOME/.local/bin/kubectl"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          kubectl version --client
+
+      - name: Install verified Kind v0.32.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --output kind "https://github.com/kubernetes-sigs/kind/releases/download/v0.32.0/kind-linux-amd64"
+          echo "50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54  kind" | sha256sum --check
+          install --mode=0755 kind "$HOME/.local/bin/kind"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          kind version
+
+      - name: Install verified Helm v4.2.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm_tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$helm_tmp_dir"' EXIT
+          archive_name=helm-v4.2.4-linux-amd64.tar.gz
+          archive="$helm_tmp_dir/$archive_name"
+          curl --fail --location --retry 3 --output "$archive" "https://get.helm.sh/$archive_name"
+          echo "c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3  $archive" | sha256sum --check
+          tar --extract --gzip --file "$archive" --directory "$helm_tmp_dir"
+          install --mode=0755 "$helm_tmp_dir/linux-amd64/helm" "$HOME/.local/bin/helm"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          helm version
+
+      - name: Prove Kubernetes deployment in a disposable cluster
+        shell: bash
+        run: bash scripts/run_kubernetes_conformance.sh
+
+  publish-ghcr:
+    name: Publish scanned service images to GHCR
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - quality
+      - migration-heads
+      - integration
+      - kubernetes-conformance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out validated commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up CPython 3.14.7
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14.7"
+
+      - name: Build all immutable service images
+        shell: bash
+        run: |
+          set -euo pipefail
+          services=(
+            reference-service identity-service customer-service catalog-service
+            search-service media-service inventory-service cart-service
+            order-service payment-service shipping-service notification-service chat-service
+          )
+          for service in "${services[@]}"; do
+            version="$(python3 -c "import tomllib; from pathlib import Path; print(tomllib.loads(Path('services/$service/pyproject.toml').read_text())['project']['version'])")"
+            image="local/${service}:${GITHUB_SHA}"
+            docker build \
+              --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+              --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+              --label "org.opencontainers.image.version=${version}" \
+              --file "services/${service}/Dockerfile" \
+              --tag "${image}" \
+              .
+          done
+
+      - name: Scan reference-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/reference-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan identity-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/identity-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan customer-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/customer-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan catalog-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/catalog-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan search-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/search-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan media-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/media-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan inventory-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/inventory-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan cart-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/cart-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan order-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/order-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan payment-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/payment-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan shipping-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/shipping-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan notification-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/notification-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Scan chat-service image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: local/chat-service:${{ github.sha }}
+          scan-type: image
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Authenticate to GitHub Container Registry after every scan gate
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Publish all scanned immutable service images
+        shell: bash
+        run: |
+          set -euo pipefail
+          namespace="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/fastapi-microservices-platform"
+          revision="${GITHUB_SHA}"
+          short_revision="${revision:0:12}"
+          services=(
+            reference-service identity-service customer-service catalog-service
+            search-service media-service inventory-service cart-service
+            order-service payment-service shipping-service notification-service chat-service
+          )
+          for service in "${services[@]}"; do
+            version="$(python3 -c "import tomllib; from pathlib import Path; print(tomllib.loads(Path('services/$service/pyproject.toml').read_text())['project']['version'])")"
+            image="${namespace}/${service}"
+            local_image="local/${service}:${revision}"
+            docker tag "${local_image}" "${image}:sha-${revision}"
+            docker tag "${local_image}" "${image}:${version}-${short_revision}"
+            docker push "${image}:sha-${revision}"
+            docker push "${image}:${version}-${short_revision}"
+            printf '%s@%s\n' "$image" "$(docker image inspect "${image}:sha-${revision}" --format '{{index .RepoDigests 0}}')" >> "$GITHUB_STEP_SUMMARY"
+          done

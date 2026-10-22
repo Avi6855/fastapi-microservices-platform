@@ -1,0 +1,40 @@
+from celery import Celery  # type: ignore[import-untyped]
+
+from media_service.config import get_settings
+from platform_observability import configure_runtime
+
+settings = get_settings()
+configure_runtime(
+    service_name=settings.service_name,
+    service_version=settings.service_version,
+    environment=settings.environment,
+    log_level=settings.log_level,
+)
+celery_app = Celery(
+    "media_service",
+    broker=settings.rabbitmq_url,
+    include=["media_service.workers.tasks"],
+)
+celery_app.conf.update(
+    imports=("media_service.workers.tasks",),
+    task_default_queue="media.processing",
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    task_time_limit=120,
+    task_soft_time_limit=90,
+    worker_prefetch_multiplier=1,
+    worker_cancel_long_running_tasks_on_connection_loss=True,
+    worker_enable_remote_control=False,
+    task_publish_retry=True,
+    task_publish_retry_policy={"max_retries": 3, "interval_start": 0, "interval_step": 1},
+    broker_transport_options={"confirm_publish": True},
+)
+
+if settings.abandoned_upload_cleanup_enabled:
+    celery_app.conf.beat_schedule = {
+        "reap-abandoned-media-uploads": {
+            "task": "media_service.reap_abandoned_uploads",
+            "schedule": settings.abandoned_upload_reap_interval_seconds,
+            "options": {"queue": "media.processing"},
+        }
+    }

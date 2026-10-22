@@ -1,0 +1,453 @@
+# Toolchain Record
+
+Phase 1 selects the minimum executable platform profile. Direct package constraints remain in the root and service manifests; uv.lock is the reproducible resolution. Image tags are explicit local-development selections and must be replaced or supplemented with immutable digests before delivery.
+
+| Component | Target phase | Selection status | Evidence required before adoption |
+|---|---:|---|---|
+| GitHub-hosted runner | 0 | `ubuntu-24.04` managed label; verified `2026-08-25` | Supported runner label, required preinstalled shell, mutable-image update policy |
+| PowerShell | 0 | Runner-provided mutable `pwsh`; minimum `7.4`; standalone `v7.6.5` reviewed `2026-08-25` but not installed | Bundled image inventory, Draft 2020-12 schema behavior, local prerequisite, mutable-image exception |
+| `actions/checkout` | 0 | `v7.0.1` pinned to `3d3c42e5aac5ba805825da76410c181273ba90b1`; verified `2026-08-25` | Official release, immutable commit SHA, runtime compatibility, minimal permissions |
+| `actions/setup-python` | 1 | `v6.2.0` pinned to `a309ff8b426b58ec0e2a45f0f869d46889d02405`; verified `2026-08-25` | Official release, immutable commit SHA, runner compatibility, explicit interpreter selection |
+| Python | 1 | CPython `3.14.7` local/CI/container baseline | Stable release, support lifecycle, platform and complete-stack compatibility |
+| `uv` | 1 | 0.12.5 | Stable release, workspace/lock behavior, Python support, reproducible installation |
+| Ruff | 1 | 0.14.14 resolved | Python support, rule compatibility, formatter/linter behavior |
+| Type checker | 1 | mypy 1.20.2 resolved | Tool choice, Python/Pydantic/plugin compatibility, strictness policy |
+| pytest | 1 | 9.1.1 resolved | Python support, plugin compatibility, asynchronous test behavior |
+| pre-commit framework | 1 | Not selected | Stable release, hook revisions, reproducible local/CI behavior |
+| FastAPI | 1 | 0.141.1 | Python, Starlette, Pydantic and OpenAPI compatibility |
+| Starlette | 1 | Not selected | FastAPI-supported range and security advisories |
+| Pydantic | 1 | Not selected | FastAPI, settings, serialization and schema compatibility |
+| Pydantic Settings | 1 | 2.15.0 | Pydantic and configuration-source compatibility |
+| Uvicorn | 1 | 0.52.4 resolved | Python/ASGI compatibility and production worker model |
+| HTTPX | 1 | 0.28.1 | Python, ASGI test client, timeout and transport compatibility |
+| SQLAlchemy | 1 | Not selected | Python, PostgreSQL driver and Alembic compatibility |
+| Alembic | 1 | Not selected | SQLAlchemy compatibility and migration behavior |
+| PostgreSQL driver | 1 | Not selected | Driver choice, SQLAlchemy support, async behavior and packaging |
+| PostgreSQL server/image | 1 | postgres:18.6 local | Supported stable release, upgrade path, extensions, architecture and digest |
+| Kafka broker/image | 1 | apache/kafka:4.2.0 local | Stable distribution, protocol baseline, KRaft/operations, architecture and digest |
+| Kafka Python client | 1 | Not selected | Python support, broker protocol, idempotent producer and tracing integration |
+| RabbitMQ server/image | 1 | rabbitmq:4.3.5-management local | Supported stable release, Celery compatibility, quorum/DLX features and digest |
+| Celery | 1 | Not selected | Python/RabbitMQ compatibility, acknowledgement, retry and shutdown semantics |
+| Redis server/image | 1 | redis:8.10.0 local | Supported stable release, persistence/degradation policy and digest |
+| Nginx edge image | 7 | `nginx:1.30.4-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46` | Stable Nginx line, official image, TLS/WebSocket/limit-module compatibility, digest pin, security scan |
+| Redis Python client | 4 | 8.1.0 | Python/server compatibility, async cache commands and failure behavior |
+| S3 Python client | 1 | Not selected | Signing, checksum, multipart and presigned-request behavior |
+| MinIO image | 1 | locally built from `minio/minio` `RELEASE.2025-10-15T17-29-55Z` at `9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a` | Latest upstream security release; MinIO no longer publishes a matching official container image, so Compose builds the official release source with its required `Go` `1.24.8` toolchain. The Dockerfile verifies that the checked-out tag resolves to the recorded commit; builder and runtime base images are digest-pinned and the runtime is non-root. |
+| OpenTelemetry API/SDK | 11 | 1.44.0 | Stable Python core, OTLP compatibility and semantic conventions |
+| OpenTelemetry instrumentation/exporters | 11 | OTLP gRPC exporter 1.44.0; manual instrumentation | Automatic integration packages are prerelease and rejected |
+| OpenTelemetry Collector image | 11 | Contrib 0.159.0 | OTLP receiver, batching, memory limiter, and backend export compatibility |
+| Testcontainers | 1 | Not selected | Python/Docker compatibility and required infrastructure modules |
+| Docker Engine/CLI | 1 | Not selected | Supported stable release, BuildKit/Compose compatibility and host constraints |
+| Docker Compose | 1 | Not selected | Stable plugin release, specification support and local topology behavior |
+| Prometheus | 11 | 3.14.0; client 0.26.0 | API scrape, alert rule, dashboard compatibility, and local retention |
+| Grafana | 11 | 13.1.0 | Provisioned datasource/dashboard compatibility and local access control |
+| Loki | 11 | 3.7.6 | OTLP Collector export, filesystem storage, and local retention |
+| Tempo | 11 | 2.9.4 | OTLP Collector export, local trace storage, and compatibility review |
+| Kubernetes | 9 | `v1.36.1` Kind conformance control-plane target; reviewed `2026-08-30` | Stable Kind node image availability, API lifecycle, target-cluster compatibility, and managed-provider support |
+| `kubectl` | 9 | `v1.36.1` CI/release client target; SHA-256 verified download | Kubernetes client-version skew policy, reproducible official distribution, and target-cluster compatibility |
+| Kind | 9 | `v0.32.0`; exact `kindest/node:v1.36.1` digest in the conformance config | Official release, Kubernetes-node compatibility, ephemeral CI support, and image-loading behavior |
+| Helm | 10 | `v4.2.4`; official archive SHA-256 `c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3`; verified `2026-08-31` | Official stable release, Kubernetes `v1.36` compatibility, chart API behavior, immutable archive verification |
+
+## Phase 0 evidence
+
+- GitHub documents `ubuntu-24.04` as a supported standard hosted-runner label. It is a managed, mutable environment rather than an immutable dependency; every CI run records the resolved image in its runner logs.
+- The official `actions/checkout` repository marks `v7.0.1` as the current stable release verified on `2026-08-25`. The workflow pins its exact official commit SHA rather than a floating tag and grants only read access to repository contents.
+- Official evidence: [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), [Ubuntu 24.04 image inventory](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md), [PowerShell `Test-Json`](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/test-json?view=powershell-7.6), [PowerShell latest release](https://github.com/PowerShell/PowerShell/releases/tag/v7.6.5), [PowerShell license](https://github.com/PowerShell/PowerShell/blob/master/LICENSE.txt), [`actions/checkout` release](https://github.com/actions/checkout/releases/tag/v7.0.1), [pinned official commit](https://github.com/actions/checkout/commit/3d3c42e5aac5ba805825da76410c181273ba90b1), [action documentation](https://github.com/actions/checkout/blob/v7.0.1/README.md), [action manifest](https://github.com/actions/checkout/blob/v7.0.1/action.yml), [security page](https://github.com/actions/checkout/security), [license](https://github.com/actions/checkout/blob/v7.0.1/LICENSE), and [GitHub Actions security guidance](https://docs.github.com/en/code-security/tutorials/secure-your-organization/protect-against-threats).
+
+### GitHub-hosted runner selection record
+
+- Purpose: execute the project-dependency-free Phase 0 structural validation workflow.
+- Stable candidate: the supported GA `ubuntu-24.04` x64 workflow label. `ubuntu-26.04` was still public preview and was rejected; the moving `ubuntu-latest` alias was avoided to prevent an unreviewed major operating-system switch.
+- Compatibility: GitHub's maintained image inventory includes PowerShell, and the managed runner is compatible with the Node 24 runtime required by current `actions/checkout`.
+- Security/support: GitHub provisions a fresh hosted environment per standard job and maintains its image. The image is mutable, so the workflow log—not repository pinning—records the exact resolved image revision for each run.
+- Bundled shell exception: Phase 0 uses the runner-provided PowerShell rather than installing or pinning another copy. Microsoft documents that PowerShell `7.4` changed `Test-Json` to the JsonSchema.NET engine used for modern JSON Schema validation. The script therefore requires `7.4` or later, checks `Test-Json -SchemaFile`, and fails with a precise prerequisite message on incompatible shells. The resolved PowerShell version is part of the mutable runner-image record.
+- License: not applicable to the managed runner service; bundled software licensing remains GitHub's image responsibility for this use.
+- Selection/pinning: explicit service label `ubuntu-24.04`; an immutable hosted-image digest is not exposed as a workflow selector.
+- Owner: platform engineering.
+- Next review: before Phase 1 CI expansion or `2026-09-25`, whichever occurs first.
+
+### PowerShell capability record
+
+- Purpose: parse repository JSON and validate Draft 2020-12 schemas without adding a project package dependency.
+- Official stable candidate: standalone PowerShell `v7.6.5`, released `2026-08-14` and marked latest when reviewed on `2026-08-25`.
+- Selection: no standalone PowerShell distribution is installed or pinned by this repository. CI intentionally accepts the GitHub-managed runner version and records it on every run; local execution accepts any `pwsh` version `7.4` or later that exposes `Test-Json -SchemaFile`.
+- Compatibility: Microsoft documents that PowerShell `7.4` moved `Test-Json` to JsonSchema.NET. The current repository schemas and negative in-memory cases were exercised successfully with the available `7.6.x` implementation.
+- Security/support: the interpreter lifecycle and patching in CI are delegated to the supported GitHub-hosted runner image. This controlled exception avoids downloading an interpreter inside the job; it also means an image update can change behavior and must be visible in logs and caught by the schema tests.
+- License: MIT.
+- Owner: platform engineering.
+- Next review: before Phase 1 CI expansion or `2026-09-25`, whichever occurs first.
+
+### `actions/checkout` selection record
+
+- Purpose: place the triggering repository revision in the Phase 0 job workspace.
+- Stable candidate: `v7.0.1`, released `2026-07-20` and marked latest by the official repository when reviewed on `2026-08-25`; no newer stable candidate existed at review time.
+- Release/migration notes: `v7` adds safer behavior for trusted workflow triggers, uses ESM, and updates dependencies including security fixes. The action uses Node 24 and requires Actions Runner `v2.327.1` or later; the selected GitHub-hosted runner is managed by GitHub. Self-hosted runners are outside this Phase 0 workflow.
+- Compatibility: only a normal `pull_request` and `push` checkout is used. No `pull_request_target`, `workflow_run`, submodule, LFS, alternate repository, or authenticated post-checkout Git operation is required.
+- Security review: the official repository listed no published security advisories at review time; this is not a guarantee that undisclosed defects do not exist. The workflow pins a full SHA, grants `contents: read`, passes no secrets, and sets `persist-credentials: false`.
+- License: MIT.
+- Selected pin: `3d3c42e5aac5ba805825da76410c181273ba90b1`, the verified official commit behind `v7.0.1`.
+- Owner: platform engineering.
+- Next review: before Phase 1 CI expansion or `2026-09-25`, whichever occurs first.
+
+For every later selection, record the exact version or digest, verification date, release date, official source, compatibility evidence, security and license review, pinning method, exceptions, and next review date. Never populate this register from model memory, tutorials, prior repositories, or cached assumptions.
+
+## Phase 1 selection evidence
+
+- Python baseline: CPython 3.14.7 is the latest stable production release selected on 2026-08-25. The repository requires 3.14 through 3.14.x, CI selects 3.14.7 explicitly, and every service image uses the official python:3.14.7-slim-bookworm tag. The locked workspace, Ruff, mypy, and 28 unit tests were exercised successfully on the locally installed CPython 3.14.0 interpreter before this baseline was changed.
+- uv: official uv release 0.12.5 was selected after verifying workspace and lock behavior. It includes the managed CPython 3.14.7 distribution required by the pinned project baseline; the installer was obtained from Astral's official release endpoint, and the resulting lock was generated with uv 0.12.5.
+- Application cluster: FastAPI 0.141.1, Pydantic Settings 2.15.0, HTTPX 0.28.1, and Uvicorn 0.52.x were resolved together by uv and validated on CPython 3.14. The lock records the exact transitive graph.
+- Development cluster: pytest, Ruff, and mypy are direct development tools; their exact resolved versions are recorded in uv.lock and validated by the Phase 1 checks.
+- Infrastructure images: PostgreSQL 18.6, Apache Kafka 4.2.0, RabbitMQ 4.3.5-management, and Redis 8.10.0 are explicit local tags. MinIO is built locally from official upstream release RELEASE.2025-10-15T17-29-55Z at commit 9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a because the official publisher stopped releasing matching container images; its release requires a source-built container and Go 1.24.8. The Dockerfile verifies the tag-to-commit resolution, pins both base-image digests, and runs the resulting image without root privileges; delivery environments must publish and promote the resulting MinIO image by immutable digest.
+- Official sources reviewed: [Python releases](https://www.python.org/downloads/), [Python official image](https://hub.docker.com/_/python), [actions/setup-python release](https://github.com/actions/setup-python/releases/tag/v6.2.0), [uv releases](https://github.com/astral-sh/uv/releases), [FastAPI release notes](https://fastapi.tiangolo.com/release-notes/), [Pydantic Settings on PyPI](https://pypi.org/project/pydantic-settings/), [SQLAlchemy on PyPI](https://pypi.org/project/SQLAlchemy/), [Uvicorn on PyPI](https://pypi.org/project/uvicorn/), [Apache Kafka downloads](https://kafka.apache.org/community/downloads/), [PostgreSQL official image](https://hub.docker.com/_/postgres), [RabbitMQ official image](https://hub.docker.com/_/rabbitmq), [Redis official image](https://hub.docker.com/_/redis), [MinIO security release](https://github.com/minio/minio/releases/tag/RELEASE.2025-10-15T17-29-55Z), and [MinIO official Docker Hub tags](https://hub.docker.com/r/minio/minio/tags).
+- Compatibility exception: the initial reference service intentionally does not include database, broker, Celery, S3, or OpenTelemetry client packages. Those clusters remain unselected until a service requires them and their official compatibility evidence is reviewed.
+
+## Phase 2 selection evidence
+
+The Phase 2 services add PostgreSQL access, password hashing, JWT validation, and
+Kafka transport. Stable releases were checked against official package indexes
+on 2026-08-25; preview releases were not selected.
+
+| Package | Selected version | Reason |
+|---|---:|---|
+| SQLAlchemy | 2.0.52 | Stable 2.0 line compatible with the async ORM and Alembic |
+| Alembic | 1.19.1 | Current stable migration tool compatible with SQLAlchemy 2.0 |
+| asyncpg | 0.31.0 | Current stable PostgreSQL async driver |
+| PyJWT | 2.13.0 | Current stable JWT implementation with cryptography extra |
+| argon2-cffi | 25.1.0 | Current stable Argon2id binding |
+| aiokafka | 0.14.0 | Current stable asyncio Kafka client |
+| email-validator | 2.3.0 | Current stable EmailStr validation dependency |
+
+Official sources: [SQLAlchemy](https://pypi.org/project/SQLAlchemy/),
+[Alembic](https://pypi.org/project/alembic/),
+[asyncpg](https://pypi.org/project/asyncpg/),
+[PyJWT](https://pypi.org/project/PyJWT/),
+[argon2-cffi](https://pypi.org/project/argon2-cffi/),
+[aiokafka](https://pypi.org/project/aiokafka/), and
+[email-validator](https://pypi.org/project/email-validator/). The exact
+transitive graph is recorded in uv.lock and is the only reproducible install
+source for the workspace.
+
+## Phase 4 selection evidence
+
+- Redis Python client: redis-py 8.1.0 was the current stable package release
+  when reviewed on 2026-08-25. It supports Python 3.10 and newer, so it is
+  compatible with this repository's Python 3.14 baseline. Cart Service uses
+  only the documented asynchronous GET, SET, and DEL cache operations.
+- Server compatibility: the local Redis 8.10.0 image remains the selected
+  development server. The cart cache behavior is validated against that server
+  at runtime. The package documentation's server-support statement does not
+  justify claiming blanket compatibility for every Redis 8.10 feature; this
+  service intentionally relies only on the stable basic cache command set.
+- Security and lifecycle: the client is a BSD-licensed dependency selected from
+  its official PyPI release. Cache failure is non-critical by ADR-013 because
+  PostgreSQL remains the sole durable cart source. The exact release is locked
+  in uv.lock and pinned in the Cart image.
+- Official sources: [redis-py on PyPI](https://pypi.org/project/redis/),
+  [redis-py documentation](https://redis.readthedocs.io/en/stable/), and
+  [Redis 8.10 release notes](https://redis.io/docs/latest/develop/whats-new/8-10/).
+- Owner: platform engineering. Next review: before Phase 5 or 2026-09-25,
+  whichever occurs first.
+
+## Phase 6 selection evidence
+
+- jsonschema: 4.26.0 was the latest stable production release on 2026-08-26.
+  It supports Python 3.10 through 3.14, implements Draft 2020-12, and is
+  MIT-licensed. It is a development-only contract-test dependency used to
+  validate the DLQ record emitted by platform-messaging against the canonical
+  JSON Schema; it is not included in service runtime dependencies. The direct
+  constraint permits the compatible 4.x line and uv.lock records the exact
+  resolved graph.
+- Official sources: [jsonschema on PyPI](https://pypi.org/project/jsonschema/)
+  and [its release history](https://github.com/python-jsonschema/jsonschema/releases).
+  Version 4.26.0's release notes report an import-time optimization only; no
+  migration is required for this narrow validator use.
+- Owner: platform engineering. Next review: before Phase 7 or 2026-09-25,
+  whichever occurs first.
+
+## Phase 7 selection evidence
+
+- `redis-py` `8.1.0` was re-reviewed on `2026-08-26` before Chat used its
+  asynchronous `PubSub` and sorted-set APIs. Its official package metadata
+  identifies `8.1.0` as the current stable `MIT` release with `Python` `3.10+`
+  support, compatible with this repository's `Python` `3.14` baseline. The
+  documented protocol requires a distinct Pub/Sub connection; Chat creates that
+  connection separately from its publisher/rate-limit client. The local
+  `Redis` `8.10.0` server remains the selected compatible development runtime.
+- `HTTPX` `0.28.1` was already locked for platform test clients and is now a
+  runtime dependency of Chat's bounded Media adapter. It remains the latest
+  stable non-prerelease in the reviewed release history, supports asynchronous
+  clients and `Python` `3.8+`, and has `BSD-3-Clause` licensing. Chat owns one
+  bounded-timeout `AsyncClient` for its lifecycle and never makes the Media
+  network call while a Chat database transaction is open.
+- No new broker, runtime, or unbounded dependency was introduced. Exact
+  transitive resolutions remain in `uv.lock`. The changed Chat and Media images
+  copy the official `uv` `0.12.5` binary from digest
+  `sha256:e85be844203885286c60ffad8a858d48afb6c5a5c237ca0e67f12e74b8f174b1`
+  and run `uv sync --locked --no-dev --no-editable --package`; this prevents
+  an image build from independently resolving package ranges. Their official
+  `Python` `3.14.7-slim-bookworm` base is pinned to index digest
+  `sha256:416f0db2a2b561945630cef9877a7ea0581b27449eb9fd9df42f03e1b74b5b63`.
+  The repository `.dockerignore` excludes the host virtual environment because
+  it is platform-specific. The internal HMAC access proof uses the standard
+  library and a rotatable external secret, not a new dependency.
+- Official sources: [redis-py `8.1.0` on PyPI](https://pypi.org/project/redis/8.1.0/),
+  [redis-py asynchronous documentation](https://redis.readthedocs.io/en/stable/examples/asyncio_examples.html),
+  [Redis sorted sets](https://redis.io/docs/latest/develop/data-types/sorted-sets/),
+  [HTTPX `0.28.1` on PyPI](https://pypi.org/project/httpx/0.28.1/), and
+  [HTTPX asynchronous documentation](https://www.python-httpx.org/async/), and
+  [uv Docker integration](https://docs.astral.sh/uv/guides/integration/docker/).
+- Owner: platform engineering. Next review: before `Phase 8` or `2026-09-25`,
+  whichever occurs first.
+
+## Zarinpal payment adapter selection evidence
+
+- Payment uses the documented Zarinpal `v4` request and verification endpoints
+  with a small owner-local adapter. The documented `StartPay` URL is built only
+  from an authority returned by the request endpoint. No third-party Zarinpal
+  Python SDK was selected because no reviewed, production-supported Python
+  package was required for this narrow protocol.
+- `HTTPX` `0.28.1` was already locked in the workspace and is now declared as a
+  direct Payment runtime dependency. The reviewed release is the current
+  stable non-prerelease line for this repository's `Python` `3.14` baseline;
+  only its documented asynchronous client and explicit timeout support are
+  used. The exact release is pinned in the Payment image and resolved in
+  `uv.lock`.
+- The adapter makes provider calls outside database transactions, uses bounded
+  timeouts, and never logs provider request/response bodies, merchant IDs, or
+  browser tokens. A persisted authority plus provider-side verification is
+  required before Payment emits success; a browser return parameter alone is
+  insufficient.
+- Official sources reviewed on `2026-08-29`: [Zarinpal REST sample](https://github.com/ZarinPal-Lab/Zarinpal-RestAPI-Sample-php/blob/master/Request.php),
+  [Zarinpal official GitHub organization](https://github.com/ZarinPal),
+  [HTTPX `0.28.1` on PyPI](https://pypi.org/project/httpx/0.28.1/), and
+  [HTTPX asynchronous documentation](https://www.python-httpx.org/async/).
+  Owner: platform engineering. Next review: before production merchant
+  activation, a provider API migration, or `2026-09-25`, whichever occurs
+  first.
+
+## Customer OTP selection evidence
+
+- The customer OTP implementation introduces no new provider SDK, broker, or
+  runtime image. `redis-py` `8.1.0` and `HTTPX` `0.28.1` are already locked,
+  reviewed dependencies and are used only for Identity's bounded Redis state
+  and authenticated, timeout-bounded private HTTP calls. The workspace lock
+  remains the reproducible dependency resolution.
+- The selected external provider integration is the official `SMS.ir` REST
+  Bulk endpoint, `POST /v1/send/bulk`, using the documented `X-API-KEY`,
+  numeric `lineNumber`, message text, and recipient list. It is implemented
+  with Python's standard library to avoid an unreviewed SDK. Provider response
+  bodies and credentials are not logged. The adapter records only a provider
+  acceptance identifier, not a carrier delivery claim.
+- The current panel workflow does not provide an approved `SMS.ir` template,
+  so the Bulk path is used only with a services-enabled line. The documented
+  `Verify` API is the future replacement when a template ID is provisioned;
+  that change must be reviewed as a provider-contract migration before use.
+  This is an operational limitation: recipients subject to carrier blocking
+  can fail to receive Bulk SMS despite provider acceptance.
+- Official sources reviewed on `2026-08-28`: [SMS.ir REST API](https://sms.ir/rest-api/),
+  [Bulk API](https://sms.ir/rest-api/), and [Verify API](https://sms.ir/rest-api/).
+  The provider interface is external and versioned by `v1`; no local provider
+  dependency is pinned. The service configuration is secret-only and the
+  selected worker retries are bounded and idempotent at the local delivery row.
+- Owner: platform engineering. Next review: before enabling a production SMS
+  line, adopting a provider template, or `2026-09-25`, whichever occurs first.
+
+## Staff operations and customer contact selection evidence
+
+- `email-validator` `2.3.0` remains the selected stable direct runtime
+  dependency for `EmailStr` validation. Customer-service now declares the same
+  reviewed `>=2.3,<3` constraint as Identity so its independently built image
+  can validate and normalize customer contact emails. The official PyPI release
+  history identifies `2.3.0` as the current stable release on `2026-08-28`;
+  it is a universal Python wheel, `Unlicense`-licensed, and already pinned by
+  the workspace `uv.lock`.
+- Customer profile validation uses syntax/normalization without DNS
+  deliverability lookup. A profile write must not block on a mutable DNS
+  dependency; mailbox verification and unsubscribe policy remain separate
+  product decisions.
+- No new package, broker, image, or runtime is introduced. Identity reuses its
+  reviewed `redis-py` `8.1.0` client for a namespaced, fail-closed staff-login
+  limiter, while Order query pagination and cursor encoding use the Python
+  standard library and PostgreSQL indexes.
+- Official sources: [email-validator on PyPI](https://pypi.org/project/email-validator/)
+  and [email-validator release history](https://pypi.org/project/email-validator/#history).
+  Owner: platform engineering. Next review: before `Phase 8` or `2026-09-25`,
+  whichever occurs first.
+
+
+## Edge selection evidence
+
+- Nginx `1.30.4` was the latest stable release when reviewed on `2026-08-28`.
+  The local edge uses the official `nginx:1.30.4-alpine` image pinned to its
+  multi-architecture index digest
+  `sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46`.
+  The selected image supports the required reverse proxy, TLS, request-limit,
+  and WebSocket upgrade directives without adding an application dependency.
+- Compatibility: the edge listens on unprivileged local ports, runs as the
+  image's non-root UID `101`, and uses writable temporary paths only on
+  Compose `tmpfs` mounts. API route prefixes are forwarded unchanged, while
+  MinIO remains direct for S3 SigV4 presigned byte paths.
+- Security and operations: the configuration disables server tokens, limits TLS
+  to `TLSv1.2` and `TLSv1.3`, disables session tickets, supplies basic
+  source-IP limits and security headers, and marks the root filesystem
+  read-only. Pull-request CI scans the exact image for `HIGH` and `CRITICAL`
+  findings using the existing pinned Trivy action. This does not claim the
+  image has no unknown or future vulnerabilities.
+- Official sources reviewed: [Nginx downloads](https://nginx.org/en/download.html),
+  [official Nginx Docker image](https://hub.docker.com/_/nginx),
+  [request-limit module](https://nginx.org/en/docs/http/ngx_http_limit_req_module.html),
+  and [WebSocket proxying](https://nginx.org/en/docs/http/websocket.html).
+- Owner: platform engineering. Next review: before `Phase 8` or `2026-09-25`,
+  whichever occurs first.
+
+## Phase 9 Kubernetes selection evidence
+
+- Kubernetes `v1.36.1` is the control-plane version of the official stable
+  `Kind v0.32.0` node image used by the executable Phase 9 conformance job.
+  The node image is pinned by digest in
+  `infrastructure/kubernetes/conformance/kind-config.yaml`. A managed
+  Kubernetes provider or self-managed cluster must still prove its selected
+  version before environment adoption; the disposable CI cluster is not an
+  assertion about a future production provider.
+- The CI/release client target is the official `kubectl` `v1.36.1` binary
+  fetched from `dl.k8s.io` together with its official SHA-256 file and
+  verified before installation. Kubernetes documents that `kubectl` is
+  supported within one minor version of the control plane, so an exact target
+  client removes an avoidable deployment discrepancy.
+- `Kind v0.32.0` is downloaded from its official release and verified against
+  the published `kind-linux-amd64` SHA-256 before the CI job uses it. The
+  conformance job loads checkout-built application images by deterministic
+  test-only tags into the disposable node; production manifests remain
+  immutable-digest-only and never reference those tags.
+- The repository uses the Kustomize functionality integrated into `kubectl`
+  for the reviewed raw Phase 9 baseline. Phase 10 additionally selects Helm
+  `v4.2.4` to package that stable model; no third-party chart dependency is
+  introduced.
+- Security and compatibility: manifests use stable `apps/v1`, `batch/v1`,
+  `policy/v1`, `networking.k8s.io/v1`, and `v1` APIs; the target cluster must
+  enforce the reviewed restricted Pod Security Standard and provide its own
+  ingress/TLS and external-state compatibility evidence. No mutable cluster
+  image or `latest` dependency is selected.
+- Official sources reviewed: [Kubernetes releases](https://kubernetes.io/releases/),
+  [kubectl overview and version skew](https://kubernetes.io/docs/concepts/overview/kubectl/),
+  [Kind `v0.32.0` release](https://github.com/kubernetes-sigs/kind/releases/tag/v0.32.0),
+  [Kind quick start](https://kind.sigs.k8s.io/docs/user/quick-start/),
+  [Kustomize with kubectl](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/kustomization/),
+  [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/),
+  [NetworkPolicy](https://kubernetes.io/docs/concepts/services-networking/network-policies/),
+  [probes](https://kubernetes.io/docs/concepts/workloads/pods/probes/), and
+  [Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/).
+  Owner: platform engineering. Next review: before selecting a target cluster
+  or `2026-09-30`, whichever occurs first.
+
+## Phase 10 Helm selection evidence
+
+- Helm `v4.2.4` was the official stable release when reviewed on `2026-08-31`.
+  Its official changelog records Kubernetes `v1.36` support, matching the
+  selected `kubectl` and `Kind` conformance control plane. Helm `v3` is in its
+  support wind-down, so it was not selected for a new chart baseline.
+- CI downloads `helm-v4.2.4-linux-amd64.tar.gz` from the official
+  `get.helm.sh` distribution endpoint and verifies the recorded SHA-256 before
+  installation. Local validation used the corresponding official Windows
+  archive and its published checksum. No Helm plugin or third-party chart is
+  installed.
+- Helm charts use `apiVersion: v2`, Kubernetes stable resource APIs already
+  proven in Phase 9, and no chart dependency. Application image helpers reject
+  mutable tags by default; only the isolated conformance values opt in to local
+  tags with `imagePullPolicy: Never`.
+- Official sources reviewed: [Helm documentation](https://helm.sh/docs/),
+  [Helm `v4.2.4` changelog](https://helm.sh/docs/changelog/),
+  [Helm 4 overview](https://helm.sh/docs/overview/),
+  [Helm quick start](https://helm.sh/docs/intro/quickstart/), and
+  [Helm 3 end-of-life notice](https://docs.helm.sh/blog/helm-v3-end-of-life/).
+  Owner: platform engineering. Next review: before a target environment uses
+  Helm, before a Helm major upgrade, or `2026-09-30`, whichever occurs first.
+
+## Phase 11 observability selection evidence
+
+- Review date: `2026-08-31`. OpenTelemetry Python API, SDK, and OTLP gRPC
+  exporter `1.44.0` are the selected stable core line. They support the
+  repository's Python `3.14` baseline and use the same OTLP protocol as the
+  selected Collector. The packages are Apache-2.0 licensed, are constrained
+  to the reviewed `1.44` line in `platform-observability`, and their exact
+  transitive resolution is in `uv.lock`.
+- Automatic Python instrumentation was rejected. The official FastAPI
+  instrumentation line was `0.65b0`, a prerelease, at review time. The
+  repository instead uses manual stable APIs for HTTP and SQLAlchemy spans so
+  the platform does not introduce unreviewed monkey patching or a prerelease
+  production dependency.
+- The upstream Python logging signal remains developmental. The selected
+  stable core package line is used only behind an optional bounded OTLP log
+  handler; JSON stdout remains the canonical application-log output and is not
+  contingent on the experimental signal's delivery behavior.
+- Prometheus client `0.26.0` is the selected Apache-2.0 Python client. It
+  supplies only bounded metric primitives; route templates, operation classes,
+  and bounded outcome values are enforced by the shared library rather than by
+  caller-supplied labels.
+- OpenTelemetry Collector Contrib `0.159.0`, Prometheus `3.14.0`, Grafana
+  `13.1.0`, Loki `3.7.6`, and Tempo `2.9.4` were the selected released stable
+  local components. The Collector accepts OTLP gRPC, batches and limits memory,
+  exposes Prometheus-format telemetry, and exports to the selected Tempo and
+  Loki HTTP receivers. Prometheus is Apache-2.0; Grafana, Loki, and Tempo are
+  AGPL-3.0 components. Their source and image licenses are acceptable for this
+  local proof only and must be re-reviewed with target-environment procurement
+  and distribution obligations.
+- Image tags are intentionally exact local-development selections, not
+  immutable artifact references. No `latest` tag is used. Before promotion,
+  platform engineering must record the official image digest, run the existing
+  image vulnerability policy against that digest, select retention/storage and
+  access controls, and review release/security notices again. This local static
+  validation does not claim that a container image was pulled or scanned.
+- All twelve application Dockerfiles use the pinned `uv` builder and
+  `uv sync --locked --no-dev --no-editable --package`. Their pinned Python and
+  `uv` source-image digests are the same reviewed digests used by the existing
+  Chat and Media images. This prevents a production image build from resolving
+  a different transitive Python dependency graph than `uv.lock`.
+- Compatibility and failure review: all application exporters are optional;
+  disabling `PLATFORM_OBSERVABILITY_ENABLED` retains JSON stdout and request
+  processing. The Collector uses the documented OTLP receiver and bounded
+  batch/memory processors. Grafana datasources and alert/dashboard assets are
+  provisioned from Git, while target Kubernetes backend topology, SSO,
+  Alertmanager routing, and high availability remain intentionally unselected.
+- Official sources reviewed: [OpenTelemetry Python SDK](https://pypi.org/project/opentelemetry-sdk/),
+  [OpenTelemetry Python instrumentation](https://opentelemetry.io/docs/languages/python/instrumentation/),
+  [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/),
+  [Collector releases](https://github.com/open-telemetry/opentelemetry-collector/releases),
+  [Prometheus Python client](https://pypi.org/project/prometheus-client/),
+  [Prometheus releases](https://github.com/prometheus/prometheus/releases),
+  [Grafana releases](https://github.com/grafana/grafana/releases),
+  [Loki releases](https://github.com/grafana/loki/releases), and
+  [Tempo releases](https://github.com/grafana/tempo/releases).
+- Owner: platform engineering. Next review: before target-environment
+  deployment, a backend major upgrade, or `2026-09-30`, whichever occurs first.
+
+## Phase 15 autoscaling selection evidence
+
+- Kubernetes `autoscaling/v2` is the stable HPA API selected for the existing
+  Kubernetes `v1.36.1` baseline. The platform uses only CPU utilization against
+  already explicit API CPU requests, avoiding an unselected custom or external
+  metric adapter. The bounded API policy is `2` to `4` replicas, `70%` target
+  CPU utilization, fast bounded scale-up, and a five-minute scale-down
+  stabilization window.
+- The official Metrics Server `v0.9.0` release was reviewed on `2026-08-31`.
+  Its official compatibility matrix covers the repository's Kubernetes `v1.36`
+  target and it exposes the required `metrics.k8s.io/v1beta1` resource API.
+  The conformance harness verifies the release manifest SHA-256
+  `1cec29a5267809306a2c6ec74a3e449abbb705b4a8beed0c8a1963910f72c79b` and
+  loads image index digest
+  `sha256:d9862115e7c7881280d3d75ca26bda8ffc0fc213315979575bf23ce9826205c0`
+  into the disposable Kind node. No production cluster add-on is selected or
+  installed by the repository.
+- Kind's self-signed kubelet certificate requires the documented
+  `--kubelet-insecure-tls` test-only exception. It is limited to the disposable
+  conformance manifest after checksum verification; a target environment must
+  provide a trusted metrics implementation and sufficient node capacity.
+- Queue workers, CronJobs, and Jobs remain outside CPU HPA because queue depth,
+  provider quotas, task idempotency, and safe concurrency need a separate
+  controller and metric design. `KEDA` is deliberately not selected.
+- Official sources reviewed: [Kubernetes HPA documentation](https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/),
+  [Metrics Server repository](https://github.com/kubernetes-sigs/metrics-server),
+  [Metrics Server `v0.9.0` release](https://github.com/kubernetes-sigs/metrics-server/releases/tag/v0.9.0),
+  and [Metrics Server compatibility matrix](https://github.com/kubernetes-sigs/metrics-server#readme).
+  Owner: platform engineering. Next review: before a target environment enables
+  autoscaling, a Kubernetes minor upgrade, or `2026-09-30`, whichever occurs first.

@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: platform-container-defaults
+  namespace: fastapi-platform
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 128Mi
+      default:
+        cpu: 500m
+        memory: 512Mi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: platform-workload-budget
+  namespace: fastapi-platform
+spec:
+  hard:
+    # Covers all API HPA targets at their four-replica ceiling, a one-Pod
+    # rolling-update surge per API, dedicated event/Celery workers, CronJobs,
+    # and controlled migration workloads. Cluster capacity remains the
+    # scheduler's responsibility.
+    pods: "90"
+    requests.cpu: "12"
+    requests.memory: 24Gi
+    limits.cpu: "84"
+    limits.memory: 48Gi

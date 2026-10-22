@@ -1,0 +1,768 @@
+name: fastapi-microservices-platform
+
+x-observability-environment: &observability-environment
+  PLATFORM_OBSERVABILITY_ENABLED: ${PLATFORM_OBSERVABILITY_ENABLED:-false}
+  PLATFORM_OTLP_GRPC_ENDPOINT: ${PLATFORM_OTLP_GRPC_ENDPOINT:-otel-collector:4317}
+
+services:
+  postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform-local-only
+      POSTGRES_DB: platform
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  kafka:
+    image: apache/kafka:4.2.0
+    ports:
+      - "127.0.0.1:29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: CONTROLLER://:29093,PLAINTEXT://:9092,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  rabbitmq:
+    image: rabbitmq:4.3.5-management
+    environment:
+      RABBITMQ_DEFAULT_USER: platform
+      RABBITMQ_DEFAULT_PASS: platform-local-only
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  redis:
+    image: redis:8.10.0
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    build:
+      context: ../minio
+      dockerfile: Dockerfile
+    image: fastapi-microservices-platform-minio:RELEASE.2025-10-15T17-29-55Z-local
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio-local
+      MINIO_ROOT_PASSWORD: minio-local-only
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  mailpit:
+    image: axllent/mailpit:v1.30.0
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  reference-service:
+    build:
+      context: ../..
+      dockerfile: services/reference-service/Dockerfile
+    environment:
+      <<: *observability-environment
+      PLATFORM_ENVIRONMENT: local
+      PLATFORM_LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  identity-service:
+    build:
+      context: ../..
+      dockerfile: services/identity-service/Dockerfile
+    environment:
+      <<: *observability-environment
+      IDENTITY_ENVIRONMENT: local
+      IDENTITY_DATABASE_URL: postgresql+asyncpg://identity_service:identity-local-only@postgres:5432/identity_service
+      IDENTITY_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      IDENTITY_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      IDENTITY_KAFKA_PUBLISHER_ENABLED: "true"
+      IDENTITY_OTP_REDIS_URL: redis://redis:6379/1
+      IDENTITY_PASSWORD_RESET_REDIS_URL: redis://redis:6379/1
+      IDENTITY_SESSION_METADATA_HMAC_SECRET: ${IDENTITY_SESSION_METADATA_HMAC_SECRET:-local-development-session-metadata-secret-change-me}
+      IDENTITY_STAFF_LOGIN_MAX_FAILURES: ${IDENTITY_STAFF_LOGIN_MAX_FAILURES:-5}
+      IDENTITY_STAFF_LOGIN_FAILURE_WINDOW_SECONDS: ${IDENTITY_STAFF_LOGIN_FAILURE_WINDOW_SECONDS:-900}
+      IDENTITY_STAFF_LOGIN_LOCKOUT_SECONDS: ${IDENTITY_STAFF_LOGIN_LOCKOUT_SECONDS:-900}
+      IDENTITY_OTP_NOTIFICATION_BASE_URL: http://notification-service:8000
+      IDENTITY_INTERNAL_OTP_SHARED_SECRET: ${PLATFORM_INTERNAL_OTP_SHARED_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  customer-service:
+    build:
+      context: ../..
+      dockerfile: services/customer-service/Dockerfile
+    environment:
+      <<: *observability-environment
+      CUSTOMER_ENVIRONMENT: local
+      CUSTOMER_DATABASE_URL: postgresql+asyncpg://customer_service:customer-local-only@postgres:5432/customer_service
+      CUSTOMER_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      CUSTOMER_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      CUSTOMER_KAFKA_CONSUMER_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  catalog-service:
+    build:
+      context: ../..
+      dockerfile: services/catalog-service/Dockerfile
+    environment:
+      <<: *observability-environment
+      CATALOG_ENVIRONMENT: local
+      CATALOG_DATABASE_URL: postgresql+asyncpg://catalog_service:catalog-local-only@postgres:5432/catalog_service
+      CATALOG_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      CATALOG_MEDIA_BASE_URL: http://media-service:8000
+      CATALOG_MEDIA_INTERNAL_ACCESS_SECRET: local-development-catalog-media-access-secret-change-me-32-bytes
+      CATALOG_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      CATALOG_KAFKA_PUBLISHER_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  search-service:
+    build:
+      context: ../..
+      dockerfile: services/search-service/Dockerfile
+    image: fastapi-microservices-platform-search-service:0.8.0-local
+    environment:
+      <<: *observability-environment
+      SEARCH_ENVIRONMENT: local
+      SEARCH_DATABASE_URL: postgresql+asyncpg://search_service:search-local-only@postgres:5432/search_service
+      SEARCH_REDIS_URL: redis://redis:6379/2
+      SEARCH_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SEARCH_KAFKA_CONSUMER_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  media-service:
+    build:
+      context: ../..
+      dockerfile: services/media-service/Dockerfile
+    image: fastapi-microservices-platform-media-service:0.4.0-local
+    environment:
+      <<: *observability-environment
+      MEDIA_ENVIRONMENT: local
+      MEDIA_DATABASE_URL: postgresql+asyncpg://media_service:media-local-only@postgres:5432/media_service
+      MEDIA_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      MEDIA_CHAT_ACCESS_SECRET: local-development-chat-media-access-secret-change-me-32-bytes
+      MEDIA_CATALOG_ACCESS_SECRET: local-development-catalog-media-access-secret-change-me-32-bytes
+      MEDIA_CATALOG_BASE_URL: http://catalog-service:8000
+      MEDIA_S3_ENDPOINT_URL: http://minio:9000
+      MEDIA_S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
+      MEDIA_RABBITMQ_URL: amqp://platform:platform-local-only@rabbitmq:5672//
+      MEDIA_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MEDIA_TASK_DISPATCHER_ENABLED: "true"
+      MEDIA_KAFKA_PUBLISHER_ENABLED: "true"
+      MEDIA_ABANDONED_UPLOAD_CLEANUP_ENABLED: "true"
+      MEDIA_ABANDONED_UPLOAD_RETENTION_SECONDS: "86400"
+      MEDIA_ABANDONED_UPLOAD_REAP_INTERVAL_SECONDS: "3600"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  inventory-service:
+    build:
+      context: ../..
+      dockerfile: services/inventory-service/Dockerfile
+    environment:
+      <<: *observability-environment
+      INVENTORY_ENVIRONMENT: local
+      INVENTORY_DATABASE_URL: postgresql+asyncpg://inventory_service:inventory-local-only@postgres:5432/inventory_service
+      INVENTORY_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      INVENTORY_ORDER_BASE_URL: http://order-service:8000
+      INVENTORY_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      INVENTORY_KAFKA_PUBLISHER_ENABLED: "true"
+      INVENTORY_KAFKA_CONSUMER_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  cart-service:
+    build:
+      context: ../..
+      dockerfile: services/cart-service/Dockerfile
+    environment:
+      <<: *observability-environment
+      CART_ENVIRONMENT: local
+      CART_DATABASE_URL: postgresql+asyncpg://cart_service:cart-local-only@postgres:5432/cart_service
+      CART_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      CART_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  order-service:
+    build:
+      context: ../..
+      dockerfile: services/order-service/Dockerfile
+    image: fastapi-microservices-platform-order-service:0.9.0-local
+    environment:
+      <<: *observability-environment
+      ORDER_ENVIRONMENT: local
+      ORDER_DATABASE_URL: postgresql+asyncpg://order_service:order-local-only@postgres:5432/order_service
+      ORDER_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      ORDER_CATALOG_BASE_URL: http://catalog-service:8000
+      ORDER_CUSTOMER_BASE_URL: http://customer-service:8000
+      ORDER_CART_BASE_URL: http://cart-service:8000
+      ORDER_PAYMENT_BASE_URL: http://payment-service:8000
+      ORDER_SHIPPING_BASE_URL: http://shipping-service:8000
+      ORDER_SHIPPING_INTERNAL_ACCESS_SECRET: local-development-order-shipping-access-secret-change-me-32-bytes
+      ORDER_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ORDER_KAFKA_PUBLISHER_ENABLED: "false"
+      ORDER_KAFKA_CONSUMER_ENABLED: "false"
+      ORDER_INVOICE_CONSUMER_ENABLED: "false"
+      ORDER_SHIPPING_CONSUMER_ENABLED: "false"
+      ORDER_TASK_DISPATCHER_ENABLED: "false"
+      ORDER_RABBITMQ_URL: amqp://platform:platform-local-only@rabbitmq:5672//
+      ORDER_S3_ENDPOINT_URL: http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      catalog-service:
+        condition: service_healthy
+      customer-service:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  payment-service:
+    build:
+      context: ../..
+      dockerfile: services/payment-service/Dockerfile
+    image: fastapi-microservices-platform-payment-service:0.7.0-local
+    environment:
+      <<: *observability-environment
+      PAYMENT_ENVIRONMENT: local
+      PAYMENT_DATABASE_URL: postgresql+asyncpg://payment_service:payment-local-only@postgres:5432/payment_service
+      PAYMENT_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      PAYMENT_ORDER_BASE_URL: http://order-service:8000
+      PAYMENT_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      PAYMENT_KAFKA_PUBLISHER_ENABLED: "true"
+      PAYMENT_KAFKA_CONSUMER_ENABLED: "true"
+      PAYMENT_ZARINPAL_MERCHANT_ID: ${ZARINPAL_MERCHANT_ID:-}
+      PAYMENT_ZARINPAL_SANDBOX: ${ZARINPAL_SANDBOX:-true}
+      PAYMENT_ZARINPAL_CALLBACK_URL: ${ZARINPAL_CALLBACK_URL:-https://localhost/api/v1/payments/zarinpal/callback}
+      PAYMENT_ZARINPAL_REQUEST_TIMEOUT_SECONDS: ${ZARINPAL_REQUEST_TIMEOUT_SECONDS:-10}
+      PAYMENT_ZIBAL_MERCHANT_ID: ${ZIBAL_MERCHANT_ID:-}
+      PAYMENT_ZIBAL_CALLBACK_URL: ${ZIBAL_CALLBACK_URL:-https://localhost/api/v1/payments/zibal/callback}
+      PAYMENT_ZIBAL_REQUEST_TIMEOUT_SECONDS: ${ZIBAL_REQUEST_TIMEOUT_SECONDS:-10}
+      PAYMENT_RESERVATION_MINUTES: ${PAYMENT_RESERVATION_MINUTES:-15}
+      PAYMENT_EXPIRY_WORKER_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  shipping-service:
+    build:
+      context: ../..
+      dockerfile: services/shipping-service/Dockerfile
+    image: fastapi-microservices-platform-shipping-service:0.1.0-local
+    environment:
+      <<: *observability-environment
+      SHIPPING_ENVIRONMENT: local
+      SHIPPING_DATABASE_URL: postgresql+asyncpg://shipping_service:shipping-local-only@postgres:5432/shipping_service
+      SHIPPING_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      SHIPPING_ORDER_BASE_URL: http://order-service:8000
+      SHIPPING_ORDER_INTERNAL_ACCESS_SECRET: local-development-order-shipping-access-secret-change-me-32-bytes
+      SHIPPING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  notification-service:
+    build:
+      context: ../..
+      dockerfile: services/notification-service/Dockerfile
+    image: fastapi-microservices-platform-notification-service:0.6.1-local
+    environment:
+      <<: *observability-environment
+      NOTIFICATION_ENVIRONMENT: local
+      NOTIFICATION_DATABASE_URL: postgresql+asyncpg://notification_service:notification-local-only@postgres:5432/notification_service
+      NOTIFICATION_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      NOTIFICATION_KAFKA_CONSUMER_ENABLED: "true"
+      NOTIFICATION_RABBITMQ_URL: amqp://platform:platform-local-only@rabbitmq:5672//
+      NOTIFICATION_TASK_DISPATCHER_ENABLED: "true"
+      NOTIFICATION_SMTP_HOST: mailpit
+      NOTIFICATION_SMTP_PORT: "1025"
+      NOTIFICATION_INTERNAL_OTP_SHARED_SECRET: ${PLATFORM_INTERNAL_OTP_SHARED_SECRET:-}
+      NOTIFICATION_IDENTITY_OTP_BASE_URL: http://identity-service:8000
+      NOTIFICATION_SMSIR_ENABLED: ${NOTIFICATION_SMSIR_ENABLED:-false}
+      NOTIFICATION_SMSIR_API_KEY: ${NOTIFICATION_SMSIR_API_KEY:-}
+      NOTIFICATION_SMSIR_LINE_NUMBER: ${NOTIFICATION_SMSIR_LINE_NUMBER:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  chat-service:
+    build:
+      context: ../..
+      dockerfile: services/chat-service/Dockerfile
+    image: fastapi-microservices-platform-chat-service:0.7.0-local
+    environment:
+      <<: *observability-environment
+      CHAT_ENVIRONMENT: local
+      CHAT_DATABASE_URL: postgresql+asyncpg://chat_service:chat-local-only@postgres:5432/chat_service
+      CHAT_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      CHAT_MEDIA_BASE_URL: http://media-service:8000
+      CHAT_MEDIA_INTERNAL_ACCESS_SECRET: local-development-chat-media-access-secret-change-me-32-bytes
+      CHAT_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  edge:
+    image: nginx:1.30.4-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
+    user: "101:101"
+    read_only: true
+    ports:
+      - "127.0.0.1:80:8080"
+      - "127.0.0.1:443:8443"
+    volumes:
+      - ../edge/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../edge:/etc/nginx/edge:ro
+      - ../edge/tls:/etc/nginx/tls:ro
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+    depends_on:
+      reference-service:
+        condition: service_healthy
+      identity-service:
+        condition: service_healthy
+      customer-service:
+        condition: service_healthy
+      catalog-service:
+        condition: service_healthy
+      search-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      shipping-service:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/health/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  order-invoice-worker:
+    image: fastapi-microservices-platform-order-service:0.9.0-local
+    pull_policy: never
+    command: ["celery", "-A", "order_service.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "--without-mingle", "--without-gossip", "-Q", "order.invoice"]
+    environment:
+      <<: *observability-environment
+      ORDER_ENVIRONMENT: local
+      ORDER_DATABASE_URL: postgresql+asyncpg://order_service:order-local-only@postgres:5432/order_service
+      ORDER_RABBITMQ_URL: amqp://platform:platform-local-only@rabbitmq:5672//
+      ORDER_S3_ENDPOINT_URL: http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  order-event-worker:
+    image: fastapi-microservices-platform-order-service:0.9.0-local
+    pull_policy: never
+    command: ["python", "-m", "order_service.workers.runtime_main"]
+    environment:
+      <<: *observability-environment
+      ORDER_ENVIRONMENT: local
+      ORDER_DATABASE_URL: postgresql+asyncpg://order_service:order-local-only@postgres:5432/order_service
+      ORDER_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      ORDER_CATALOG_BASE_URL: http://catalog-service:8000
+      ORDER_CUSTOMER_BASE_URL: http://customer-service:8000
+      ORDER_CART_BASE_URL: http://cart-service:8000
+      ORDER_PAYMENT_BASE_URL: http://payment-service:8000
+      ORDER_SHIPPING_BASE_URL: http://shipping-service:8000
+      ORDER_SHIPPING_INTERNAL_ACCESS_SECRET: local-development-order-shipping-access-secret-change-me-32-bytes
+      ORDER_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ORDER_KAFKA_PUBLISHER_ENABLED: "true"
+      ORDER_KAFKA_CONSUMER_ENABLED: "true"
+      ORDER_INVOICE_CONSUMER_ENABLED: "true"
+      ORDER_SHIPPING_CONSUMER_ENABLED: "true"
+      ORDER_TASK_DISPATCHER_ENABLED: "true"
+      ORDER_RABBITMQ_URL: amqp://platform:platform-local-only@rabbitmq:5672//
+      ORDER_S3_ENDPOINT_URL: http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  shipping-event-worker:
+    image: fastapi-microservices-platform-shipping-service:0.1.0-local
+    pull_policy: never
+    command: ["python", "-m", "shipping_service.workers.runtime_main"]
+    environment:
+      <<: *observability-environment
+      SHIPPING_ENVIRONMENT: local
+      SHIPPING_DATABASE_URL: postgresql+asyncpg://shipping_service:shipping-local-only@postgres:5432/shipping_service
+      SHIPPING_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
+      SHIPPING_ORDER_BASE_URL: http://order-service:8000
+      SHIPPING_ORDER_INTERNAL_ACCESS_SECRET: local-development-order-shipping-access-secret-change-me-32-bytes
+      SHIPPING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SHIPPING_KAFKA_CONSUMER_ENABLED: "true"
+      SHIPPING_KAFKA_PUBLISHER_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  notification-worker:
+    image: fastapi-microservices-platform-notification-service:0.6.1-local
+    pull_policy: never
+    command: ["celery", "-A", "notification_service.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "--without-mingle", "--without-gossip", "-Q", "notification.email"]
+    environment:
+      <<: *observability-environment
+      NOTIFICATION_ENVIRONMENT: local
+      NOTIFICATION_DATABASE_URL: postgresql+asyncpg://notification_service:notification-local-only@postgres:5432/notification_service
+      NOTIFICATION_RABBITMQ_URL: amqp://platform:platform-local-only@rabbitmq:5672//
+      NOTIFICATION_SMTP_HOST: mailpit
+      NOTIFICATION_SMTP_PORT: "1025"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+
+  notification-sms-worker:
+    image: fastapi-microservices-platform-notification-service:0.6.1-local
+    pull_policy: never
+    command: ["celery", "-A", "notification_service.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "--without-mingle", "--without-gossip", "-Q", "notification.sms"]
+    environment:
+      <<: *observability-environment
+      NOTIFICATION_ENVIRONMENT: local
+      NOTIFICATION_DATABASE_URL: postgresql+asyncpg://notification_service:notification-local-only@postgres:5432/notification_service
+      NOTIFICATION_RABBITMQ_URL: amqp://platform:platform-local-only@rabbitmq:5672//
+      NOTIFICATION_INTERNAL_OTP_SHARED_SECRET: ${PLATFORM_INTERNAL_OTP_SHARED_SECRET:-}
+      NOTIFICATION_IDENTITY_OTP_BASE_URL: http://identity-service:8000
+      NOTIFICATION_SMSIR_ENABLED: ${NOTIFICATION_SMSIR_ENABLED:-false}
+      NOTIFICATION_SMSIR_API_KEY: ${NOTIFICATION_SMSIR_API_KEY:-}
+      NOTIFICATION_SMSIR_LINE_NUMBER: ${NOTIFICATION_SMSIR_LINE_NUMBER:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      identity-service:
+        condition: service_healthy
+
+  media-worker:
+    image: fastapi-microservices-platform-media-service:0.4.0-local
+    pull_policy: never
+    command: ["celery", "-A", "media_service.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "--without-mingle", "--without-gossip"]
+    environment:
+      <<: *observability-environment
+      MEDIA_ENVIRONMENT: local
+      MEDIA_DATABASE_URL: postgresql+asyncpg://media_service:media-local-only@postgres:5432/media_service
+      MEDIA_S3_ENDPOINT_URL: http://minio:9000
+      MEDIA_S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
+      MEDIA_CATALOG_ACCESS_SECRET: local-development-catalog-media-access-secret-change-me-32-bytes
+      MEDIA_RABBITMQ_URL: amqp://platform:platform-local-only@rabbitmq:5672//
+      MEDIA_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MEDIA_ABANDONED_UPLOAD_CLEANUP_ENABLED: "true"
+      MEDIA_ABANDONED_UPLOAD_RETENTION_SECONDS: "86400"
+      MEDIA_ABANDONED_UPLOAD_REAP_INTERVAL_SECONDS: "3600"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  media-beat:
+    image: fastapi-microservices-platform-media-service:0.4.0-local
+    pull_policy: never
+    command: ["celery", "-A", "media_service.workers.celery_app:celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
+    environment:
+      <<: *observability-environment
+      MEDIA_ENVIRONMENT: local
+      MEDIA_DATABASE_URL: postgresql+asyncpg://media_service:media-local-only@postgres:5432/media_service
+      MEDIA_RABBITMQ_URL: amqp://platform:platform-local-only@rabbitmq:5672//
+      MEDIA_ABANDONED_UPLOAD_CLEANUP_ENABLED: "true"
+      MEDIA_ABANDONED_UPLOAD_RETENTION_SECONDS: "86400"
+      MEDIA_ABANDONED_UPLOAD_REAP_INTERVAL_SECONDS: "3600"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.159.0
+    profiles: [observability]
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:13133:13133"
+    volumes:
+      - ../observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    depends_on:
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    profiles: [observability]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - observability-prometheus-data:/prometheus
+
+  loki:
+    image: grafana/loki:3.7.6
+    profiles: [observability]
+    command: ["-config.file=/etc/loki/config.yaml"]
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ../observability/loki.yaml:/etc/loki/config.yaml:ro
+      - observability-loki-data:/loki
+
+  tempo:
+    image: grafana/tempo:2.9.4
+    profiles: [observability]
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    ports:
+      - "127.0.0.1:3200:3200"
+    volumes:
+      - ../observability/tempo.yaml:/etc/tempo/config.yaml:ro
+      - observability-tempo-data:/var/tempo
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: observability-local-only
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/etc/grafana-dashboard-json:ro
+      - observability-grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  redis-data:
+  minio-data:
+  observability-prometheus-data:
+  observability-loki-data:
+  observability-tempo-data:
+  observability-grafana-data:

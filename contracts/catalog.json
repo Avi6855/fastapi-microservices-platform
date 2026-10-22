@@ -1,0 +1,384 @@
+{
+  "catalog_schema": "catalog.schema.json",
+  "catalog_version": 1,
+  "project": "FastAPI Microservices Platform",
+  "namespace": "fastapi-platform",
+  "contracts": [
+    {
+      "name": "identity.user_registered.v1",
+      "kind": "domain-event",
+      "owner": "identity-service",
+      "consumers": ["customer-service"],
+      "status": "deprecated",
+      "topic": "fastapi-platform.identity.events.v1",
+      "message_key": "aggregate_id",
+      "notes": "Customer creates its own profile projection from this durable identity fact.",
+      "schema": "events/identity.user_registered.v1.schema.json"
+    },
+    {
+      "name": "identity.user_registered.v2",
+      "kind": "domain-event",
+      "owner": "identity-service",
+      "consumers": ["customer-service"],
+      "status": "active",
+      "topic": "fastapi-platform.identity.events.v1",
+      "message_key": "aggregate_id",
+      "notes": "Phone-only customer registration after successful OTP verification. Raw OTP values never enter Kafka.",
+      "schema": "events/identity.user_registered.v2.schema.json"
+    },
+    {
+      "name": "identity.auth.v1",
+      "kind": "service-openapi",
+      "owner": "identity-service",
+      "status": "active",
+      "notes": "Public customer OTP and staff password authentication endpoints. Internal OTP delivery retrieval is intentionally excluded.",
+      "schema": "openapi/identity-auth.v1.openapi.json"
+    },
+    {
+      "name": "customer.profile.v1",
+      "kind": "service-openapi",
+      "owner": "customer-service",
+      "status": "active",
+      "notes": "Customer-owned contact profile API. The contact email is not an Identity credential and is required for checkout invoice email.",
+      "schema": "openapi/customer-profile.v1.openapi.json"
+    },
+    {
+      "name": "order.query.v1",
+      "kind": "service-openapi",
+      "owner": "order-service",
+      "status": "active",
+      "notes": "Customer-owned order history and administrator-only fulfillment and refund-request operations.",
+      "schema": "openapi/order-query.v1.openapi.json"
+    },
+    {
+      "name": "order.checkout.v1",
+      "kind": "service-openapi",
+      "owner": "order-service",
+      "status": "active",
+      "notes": "Customer checkout commands, including the Cart-backed one-step Zarinpal redirect path.",
+      "schema": "openapi/order-checkout.v1.openapi.json"
+    },
+    {
+      "name": "shipping.commands.v1",
+      "kind": "service-openapi",
+      "owner": "shipping-service",
+      "status": "active",
+      "notes": "Administrator shipment commands are idempotent and obtain an Order-owned short-lived authorization before Shipping commits its local transition.",
+      "schema": "openapi/shipping-commands.v1.openapi.json"
+    },
+    {
+      "name": "order.shipping_authorization.v1",
+      "kind": "service-openapi",
+      "owner": "order-service",
+      "status": "active",
+      "notes": "HMAC-authenticated durable coordination boundary: Shipping obtains one short-lived Order authorization and Order later reads the definitive Shipping command state for safe expiry recovery.",
+      "schema": "openapi/order-shipping-authorization.v1.openapi.json"
+    },
+    {
+      "name": "order.returns.v1",
+      "kind": "service-openapi",
+      "owner": "order-service",
+      "status": "active",
+      "notes": "Customer full-order returns after delivery, administrator decision and physical receipt. Provider refund and Inventory restoration remain independently owned handoffs.",
+      "schema": "openapi/order-returns.v1.openapi.json"
+    },
+    {
+      "name": "payment.zarinpal.v1",
+      "kind": "service-openapi",
+      "owner": "payment-service",
+      "status": "active",
+      "notes": "Customer payment-start API and verified Zarinpal browser-return callback. Zarinpal reversal is started only from Order's durable administrator refund request.",
+      "schema": "openapi/payment-zarinpal.v1.openapi.json"
+    },
+    {
+      "name": "search.query.v1",
+      "kind": "service-openapi",
+      "owner": "search-service",
+      "status": "active",
+      "notes": "Public search of the eventually consistent Catalog projection; it never exposes draft products or canonical Catalog writes.",
+      "schema": "openapi/search-query.v1.openapi.json"
+    },
+    {
+      "name": "catalog.products.v1",
+      "kind": "service-openapi",
+      "owner": "catalog-service",
+      "status": "active",
+      "notes": "Public cursor-paginated listing of canonical published Catalog products, including same-origin public product-media URLs.",
+      "schema": "openapi/catalog-products.v1.openapi.json"
+    },
+    {
+      "name": "catalog.management.v1",
+      "kind": "service-openapi",
+      "owner": "catalog-service",
+      "status": "active",
+      "notes": "Administrator-only management of products, categories, brands, variants, and product-media relations. Product deletion archives and variant deletion retires.",
+      "schema": "openapi/catalog-management.v1.openapi.json"
+    },
+    {
+      "name": "catalog.reviews.v1",
+      "kind": "service-openapi",
+      "owner": "catalog-service",
+      "status": "active",
+      "notes": "Public approved product reviews and one-level replies, authenticated submissions, and administrator-only moderation. Public responses intentionally omit author identifiers and internal moderation state.",
+      "schema": "openapi/catalog-reviews.v1.openapi.json"
+    },
+    {
+      "name": "media.catalog_attachment.v1",
+      "kind": "service-openapi",
+      "owner": "media-service",
+      "status": "active",
+      "notes": "Internal, HMAC-authenticated readiness and ownership validation before Catalog persists an opaque product-image reference.",
+      "schema": "openapi/media-catalog-attachment.v1.openapi.json"
+    },
+    {
+      "name": "media.assets.v1",
+      "kind": "service-openapi",
+      "owner": "media-service",
+      "status": "active",
+      "notes": "Owner-scoped upload, inspection, deletion, and public ready product-image redirect API. Product-image mutations require an administrator.",
+      "schema": "openapi/media-assets.v1.openapi.json"
+    },
+    {
+      "name": "catalog.media_reference.v1",
+      "kind": "service-openapi",
+      "owner": "catalog-service",
+      "status": "active",
+      "notes": "Internal HMAC-authenticated Media read of Catalog-owned product-image references before an asset deletion starts.",
+      "schema": "openapi/catalog-media-reference.v1.openapi.json"
+    },
+    {
+      "name": "event-envelope.v1",
+      "kind": "event-envelope",
+      "owner": "platform",
+      "status": "active",
+      "schema": "events/event-envelope.v1.schema.json"
+    },
+    {
+      "name": "kafka.dead_letter.v1",
+      "kind": "dead-letter-envelope",
+      "owner": "platform",
+      "status": "active",
+      "topic": "fastapi-platform.dead-letter.v1",
+      "message_key": "source.topic:source.partition:source.offset",
+      "notes": "Technical Kafka processing failures only. The original record is preserved as base64 bytes together with source coordinates and local retry history.",
+      "schema": "events/kafka.dead_letter.v1.schema.json"
+    },
+    {
+      "name": "error-response.v1",
+      "kind": "api-error-envelope",
+      "owner": "platform",
+      "status": "active",
+      "schema": "openapi/error-response.v1.schema.json"
+    },
+    {
+      "name": "chat.v1",
+      "kind": "realtime-client-protocol",
+      "owner": "chat-service",
+      "status": "active",
+      "notes": "Bidirectional WebSocket client protocol. Sender acknowledgements follow the local Chat PostgreSQL commit; messages may be duplicated across reconnect or Redis fan-out and are deduplicated by message_id.",
+      "schema": "realtime/chat.v1.schema.json"
+    },
+    {
+      "name": "chat.support.v1",
+      "kind": "service-openapi",
+      "owner": "chat-service",
+      "status": "active",
+      "notes": "Customer support queue creation, metadata-only administrator queue listing, atomic claim, release, and close operations. The assigned administrator becomes the only administrator participant.",
+      "schema": "openapi/chat-support.v1.openapi.json"
+    },
+    {
+      "name": "order.created.v1",
+      "kind": "domain-event",
+      "owner": "order-service",
+      "consumers": ["inventory-service"],
+      "status": "active",
+      "topic": "fastapi-platform.order.events.v1",
+      "message_key": "order_id",
+      "notes": "Checkout workflow key is order_id.",
+      "schema": "events/order.created.v1.schema.json"
+    },
+    {
+      "name": "inventory.reserved.v1",
+      "kind": "domain-event",
+      "owner": "inventory-service",
+      "consumers": ["order-service", "payment-service"],
+      "status": "active",
+      "topic": "fastapi-platform.inventory.events.v1",
+      "message_key": "order_id",
+      "notes": "Checkout workflow key is order_id.",
+      "schema": "events/inventory.reserved.v1.schema.json"
+    },
+    {
+      "name": "inventory.reservation_failed.v1",
+      "kind": "domain-event",
+      "owner": "inventory-service",
+      "consumers": ["order-service"],
+      "status": "active",
+      "topic": "fastapi-platform.inventory.events.v1",
+      "message_key": "order_id",
+      "notes": "Checkout workflow key is order_id.",
+      "schema": "events/inventory.reservation_failed.v1.schema.json"
+    },
+    {
+      "name": "payment.processing.v1",
+      "kind": "domain-event",
+      "owner": "payment-service",
+      "consumers": ["order-service"],
+      "status": "active",
+      "topic": "fastapi-platform.payment.events.v1",
+      "message_key": "order_id",
+      "notes": "Payment accepted the reservation and opened its local payment workflow.",
+      "schema": "events/payment.processing.v1.schema.json"
+    },
+    {
+      "name": "payment.succeeded.v1",
+      "kind": "domain-event",
+      "owner": "payment-service",
+      "consumers": ["order-service", "inventory-service"],
+      "status": "active",
+      "topic": "fastapi-platform.payment.events.v1",
+      "message_key": "order_id",
+      "notes": "Checkout workflow key is order_id.",
+      "schema": "events/payment.succeeded.v1.schema.json"
+    },
+    {
+      "name": "payment.failed.v1",
+      "kind": "domain-event",
+      "owner": "payment-service",
+      "consumers": ["order-service", "inventory-service"],
+      "status": "active",
+      "topic": "fastapi-platform.payment.events.v1",
+      "message_key": "order_id",
+      "notes": "Checkout workflow key is order_id.",
+      "schema": "events/payment.failed.v1.schema.json"
+    },
+    {
+      "name": "payment.refunded.v1",
+      "kind": "domain-event",
+      "owner": "payment-service",
+      "consumers": ["order-service", "inventory-service"],
+      "status": "active",
+      "topic": "fastapi-platform.payment.events.v1",
+      "message_key": "order_id",
+      "notes": "Payment completed a Zarinpal reversal for the durable Order refund request.",
+      "schema": "events/payment.refunded.v1.schema.json"
+    },
+    {
+      "name": "payment.refund_failed.v1",
+      "kind": "domain-event",
+      "owner": "payment-service",
+      "consumers": ["order-service"],
+      "status": "active",
+      "topic": "fastapi-platform.payment.events.v1",
+      "message_key": "order_id",
+      "notes": "Payment rejected the durable Order refund request before a reversal completed.",
+      "schema": "events/payment.refund_failed.v1.schema.json"
+    },
+    {
+      "name": "order.confirmed.v1",
+      "kind": "domain-event",
+      "owner": "order-service",
+      "consumers": ["order-service", "shipping-service"],
+      "status": "active",
+      "topic": "fastapi-platform.order.events.v1",
+      "message_key": "order_id",
+      "notes": "Order is terminally confirmed. Independent Order and Shipping consumer groups create their durable invoice-generation and READY-shipment handoffs.",
+      "schema": "events/order.confirmed.v1.schema.json"
+    },
+    {
+      "name": "order.refund_requested.v1",
+      "kind": "domain-event",
+      "owner": "order-service",
+      "consumers": ["payment-service"],
+      "status": "active",
+      "topic": "fastapi-platform.order.events.v1",
+      "message_key": "order_id",
+      "notes": "Order requested a provider-owned reversal. A delivered-order return includes return_request_id after physical receipt; the original administrator path remains supported.",
+      "schema": "events/order.refund_requested.v1.schema.json"
+    },
+    {
+      "name": "order.return_received.v1",
+      "kind": "domain-event",
+      "owner": "order-service",
+      "consumers": ["inventory-service"],
+      "status": "active",
+      "topic": "fastapi-platform.order.events.v1",
+      "message_key": "order_id",
+      "notes": "Order recorded receipt of a full delivered-order return. Inventory restores the no-PII SKU/quantity snapshot exactly once for the return identifier.",
+      "schema": "events/order.return_received.v1.schema.json"
+    },
+    {
+      "name": "shipping.status_updated.v1",
+      "kind": "domain-event",
+      "owner": "shipping-service",
+      "consumers": ["order-service"],
+      "status": "active",
+      "topic": "fastapi-platform.shipping.events.v1",
+      "message_key": "order_id",
+      "notes": "Shipping committed one authorization-bound shipment transition. It contains no delivery address or carrier-provider credentials; Order consumes it only after matching its local authorization.",
+      "schema": "events/shipping.status_updated.v1.schema.json"
+    },
+    {
+      "name": "order.fulfillment_updated.v1",
+      "kind": "domain-event",
+      "owner": "order-service",
+      "consumers": [],
+      "status": "active",
+      "topic": "fastapi-platform.order.events.v1",
+      "message_key": "order_id",
+      "notes": "Administrator advanced a paid order through fulfillment; this is retained for future projections.",
+      "schema": "events/order.fulfillment_updated.v1.schema.json"
+    },
+    {
+      "name": "invoice.generated.v1",
+      "kind": "domain-event",
+      "owner": "order-service",
+      "consumers": ["notification-service"],
+      "status": "active",
+      "topic": "fastapi-platform.order.events.v1",
+      "message_key": "order_id",
+      "notes": "Invoice bytes remain Order-owned object storage data; Notification receives only the delivery fact and recipient contact snapshot.",
+      "schema": "events/invoice.generated.v1.schema.json"
+    },
+    {
+      "name": "media.ready.v1",
+      "kind": "domain-event",
+      "owner": "media-service",
+      "consumers": [],
+      "status": "active",
+      "topic": "fastapi-platform.media.events.v1",
+      "message_key": "aggregate_id",
+      "schema": "events/media.ready.v1.schema.json"
+    },
+    {
+      "name": "product.created.v1",
+      "kind": "domain-event",
+      "owner": "catalog-service",
+      "consumers": ["search-service"],
+      "status": "active",
+      "topic": "fastapi-platform.catalog.events.v1",
+      "message_key": "aggregate_id",
+      "schema": "events/product.created.v1.schema.json"
+    },
+    {
+      "name": "product.updated.v1",
+      "kind": "domain-event",
+      "owner": "catalog-service",
+      "consumers": ["search-service"],
+      "status": "active",
+      "topic": "fastapi-platform.catalog.events.v1",
+      "message_key": "aggregate_id",
+      "schema": "events/product.updated.v1.schema.json"
+    },
+    {
+      "name": "product.deleted.v1",
+      "kind": "domain-event",
+      "owner": "catalog-service",
+      "consumers": ["search-service"],
+      "status": "active",
+      "topic": "fastapi-platform.catalog.events.v1",
+      "message_key": "aggregate_id",
+      "schema": "events/product.deleted.v1.schema.json"
+    }
+  ]
+}

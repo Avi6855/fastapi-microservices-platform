@@ -1,0 +1,101 @@
+# Edge gateway runbook
+
+## Scope
+
+The local edge container is the only public entry point for versioned APIs and
+the Chat WebSocket. Its canonical local address is `https://localhost`.
+The HTTP listener at `http://localhost` redirects ordinary requests to
+TLS and exposes health endpoints for container checks.
+
+This runbook applies to local Compose only. It does not establish a production
+certificate or Kubernetes ingress policy.
+
+## Prerequisites
+
+Generate a local certificate once per development machine:
+
+```powershell
+pwsh -NoProfile -File scripts/new_local_edge_certificate.ps1
+```
+
+The certificate and its private key are created under
+`infrastructure/edge/tls/`, ignored by Git, and valid for `30` days. The
+script does not replace an existing pair unless `-Force` is supplied. A
+browser warning is expected until the certificate is explicitly trusted by that
+developer machine.
+
+## Start and verify
+
+```powershell
+docker compose -f infrastructure/compose/docker-compose.yml up -d --build --wait
+curl.exe -k https://localhost/health/ready
+curl.exe -i http://localhost/api/v1/reference
+docker compose -f infrastructure/compose/docker-compose.yml ps edge
+```
+
+The HTTPS request returns `200`. The HTTP request returns `308` with the
+canonical HTTPS location. `-k` is local-only because the certificate is
+self-signed.
+
+## Local Swagger
+
+Open `https://localhost/docs/` and select the service to inspect. Each
+`/docs/<service>` page has its own proxied OpenAPI document at
+`/docs/<service>/openapi.json`, so the Swagger UI sends requests to the
+existing local API routes and does not expose a service host port.
+
+This is a Docker Compose development convenience only. It is not a public API
+contract and must not be copied into a Kubernetes ingress or production edge
+configuration. The stock FastAPI Swagger page loads its UI assets from its
+configured `jsDelivr` CDN, so a browser needs access to that CDN to render the
+interactive interface.
+
+## Routing checks
+
+- Open `https://localhost` to verify the edge root response.
+- Open `https://localhost/docs/` to inspect local service Swagger interfaces.
+- Call public APIs through `https://localhost/api/v1/...`.
+- Connect Chat through `wss://localhost/api/v1/chat/ws`.
+- A request to `/api/internal/` must return `404`.
+- No direct host publication exists for service ports `8000` through
+  `8010`.
+- MinIO `9000` remains direct for presigned object bytes; Mailpit `8025`
+  remains an operator/development UI.
+
+## Diagnose
+
+```powershell
+docker compose -f infrastructure/compose/docker-compose.yml logs --no-color edge
+docker compose -f infrastructure/compose/docker-compose.yml exec edge nginx -t
+curl.exe -k -i https://localhost/api/v1/reference
+docker compose -f infrastructure/compose/docker-compose.yml config
+```
+
+- A failed TLS handshake usually means the certificate files are absent,
+  expired, or unreadable by the container. Regenerate them deliberately with
+  `-Force`, then recreate `edge`.
+- A `502` indicates that the mapped upstream service is unavailable; inspect
+  its health and logs. Do not change routing to a direct host port.
+- A `404` accompanied by the wrong `upstream_addr` after an API container was
+  recreated indicates stale service discovery. The local edge resolves Docker
+  service names dynamically; validate its configuration with `nginx -t` and
+  wait for the bounded resolver cache before recreating edge.
+- A `429` is an edge source-IP limit. It is expected for repeated login,
+  OTP/password-reset, upload, or WebSocket-upgrade attempts. Password/OTP and
+  WebSocket upgrades use separate buckets, so exhausting one does not consume
+  the other; wait for the applicable configured window and inspect the
+  service-owned limit separately.
+- A WebSocket failure requires checking the exact `/api/v1/chat/ws` path and
+  the `Upgrade` headers; the access token still belongs in the first protocol
+  frame, never in the URL.
+
+## Recovery
+
+After configuration or certificate changes, recreate only the edge container:
+
+```powershell
+docker compose -f infrastructure/compose/docker-compose.yml up -d --force-recreate edge
+```
+
+Do not restart stateful dependencies merely to repair edge routing. Preserve
+service authorization and internal-network boundaries while diagnosing.
