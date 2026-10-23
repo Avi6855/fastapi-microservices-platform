@@ -27,6 +27,10 @@ build/
 *.pem
 *.key
 
+# Go build output
+/tools/backupctl/backupctl
+/tools/backupctl/backupctl.exe
+
 # Terraform
 **/.terraform/
 *.tfstate

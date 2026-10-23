@@ -114,6 +114,44 @@ jobs:
       - name: Validate Docker Compose model
         run: docker compose -f infrastructure/compose/docker-compose.yml config --quiet
 
+  backup-tool:
+    name: Object-storage backup drill tool
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install verified Go v1.27.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=1.27.3
+          archive_name="go${version}.linux-amd64.tar.gz"
+          archive="$RUNNER_TEMP/$archive_name"
+          curl --fail --location --retry 3 --output "$archive" "https://go.dev/dl/${archive_name}"
+          echo "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40  $archive" | sha256sum --check
+          mkdir --parents --mode=0755 "$RUNNER_TEMP/go-sdk"
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP/go-sdk" --strip-components=1
+          echo "$RUNNER_TEMP/go-sdk/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/go-sdk/bin/go" version
+
+      - name: Verify backup tool formatting, vet, tests, and build
+        working-directory: tools/backupctl
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Unformatted Go files:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+          go vet ./...
+          go test ./... -count=1
+          go build -trimpath -o /tmp/backupctl .
+
   migration-heads:
     name: Validate service migration heads
     needs: quality

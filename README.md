@@ -135,6 +135,7 @@ Each service directory contains its own `README.md`, `src/`, `tests/`, migration
 | Delivery | Docker Compose locally; Kubernetes manifests + Helm charts; disposable `Kind` conformance cluster; an Azure AKS target defined in reviewed Terraform and never provisioned |
 | Observability | OpenTelemetry Collector 0.159, Prometheus 3.14, Loki 3.7, Tempo 2.9, Grafana 13.1 |
 | Quality tooling | pytest 9.1, mypy (strict), Ruff, pip-audit, Trivy image scanning |
+| Backup drill | Go 1.27 `backupctl` with a checksummed manifest, verified copies, and a restore that refuses corrupt snapshots |
 
 The exact pinned versions live in [uv.lock](uv.lock) and [infrastructure/compose/docker-compose.yml](infrastructure/compose/docker-compose.yml); the policy is documented in [docs/development/dependency-policy.md](docs/development/dependency-policy.md).
 
@@ -343,7 +344,8 @@ services/       13 independently deployable bounded contexts + documented servic
 libs/           platform-auth, platform-messaging, platform-observability (technical primitives only)
 contracts/      canonical OpenAPI and JSON Schema event artifacts (49 files)
 infrastructure/ Compose, edge gateway, MinIO, Kubernetes, Helm, Azure Terraform, observability
-docs/           115 documents: architecture, 43 ADRs, diagrams, events, runbooks, phase plans
+tools/          backupctl: the Go backup, verify, and restore drill
+docs/           117 documents: architecture, 44 ADRs, diagrams, events, runbooks, phase plans
 scripts/        repeatable developer, migration, and delivery automation
 tests/e2e/      cross-service workflow tests
 .github/        CI/CD workflows
@@ -403,7 +405,7 @@ This project was built as a focused demonstration of the skills an **Application
 | **Observability and debugging** | Probes, structured logs, Prometheus metrics, OpenTelemetry traces, Grafana dashboards, and per-incident runbooks |
 | **Security fundamentals** | Hashed credentials, short-lived tokens, inter-service authorization, secret handling, and image vulnerability gating |
 | **CI/CD and cloud-native delivery** | Automated gate chain, disposable `Kind` conformance cluster, Helm packaging, immutable scanned images |
-| **Technical communication** | 43 ADRs, 115 documents, diagrams, runbooks, and a claim-to-evidence reviewer guide |
+| **Technical communication** | 44 ADRs, 117 documents, diagrams, runbooks, and a claim-to-evidence reviewer guide |
 
 ---
 

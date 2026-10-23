@@ -33,4 +33,5 @@ Implemented: [Kafka dead-letter inspection and replay](kafka-dlq.md),
 [online payment provider routing](online-payment-provider-routing.md), and
 [post-delivery return reconciliation](post-delivery-returns.md), and
 [Azure Blob object storage](azure-blob-storage.md), and
-[Azure AKS delivery](azure-aks-delivery.md).
+[Azure AKS delivery](azure-aks-delivery.md), and
+[object-storage backup and restore](object-storage-backup-restore.md).

@@ -23,6 +23,7 @@ ADRs record decisions that materially affect service ownership, contracts, durab
 
 | ADR | Status | Decision |
 |---|---|---|
+| [ADR-044](ADR-044-verified-object-storage-backup-drill.md) | Accepted | Verified object-storage backup and restore drill |
 | [ADR-043](ADR-043-azure-aks-delivery-target.md) | Accepted | Azure AKS delivery target, authored and never provisioned |
 | [ADR-042](ADR-042-azure-blob-object-storage-adapter.md) | Accepted | Azure Blob Storage adapter behind the object-storage port |
 | [ADR-041](ADR-041-catalog-management-and-public-product-media.md) | Accepted | Administrator-only Catalog management and public product-media delivery |
