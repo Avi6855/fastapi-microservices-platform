@@ -18,7 +18,8 @@ SERVICES = (
 
 RUNTIME_SECURITY_HARDENING = (
     "RUN apt-get update \\\n"
-    "    && apt-get install --no-install-recommends --only-upgrade --yes libpcre2-8-0 perl-base \\\n"
+    "    && apt-get install --no-install-recommends --only-upgrade --yes "
+    "libpcre2-8-0 perl-base \\\n"
     "    && rm -rf /var/lib/apt/lists/* \\\n"
     "    && rm -rf /usr/local/lib/python3.14/site-packages/pip "
     "/usr/local/lib/python3.14/site-packages/pip-*.dist-info "
