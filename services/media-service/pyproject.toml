@@ -12,7 +12,7 @@ dependencies = [
   "celery>=5.6.3,<6",
   "fastapi>=0.141.1,<0.142",
   "httpx>=0.28.1,<0.29",
-  "Pillow>=12.3,<13",
+  "Pillow>=13.0,<14",
   "platform-auth",
   "platform-observability",
   "pydantic-settings>=2.15,<3",

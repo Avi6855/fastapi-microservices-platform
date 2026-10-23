@@ -20,9 +20,16 @@ dev = [
 
 [tool.uv]
 default-groups = ["dev"]
-# botocore and requests both accept a patched urllib3; the transitive floor is
-# raised here so the dependency audit stays satisfiable without a per-service pin.
-constraint-dependencies = ["urllib3>=2.8.0"]
+# The audit gate runs without exceptions, so patched transitive floors live here
+# instead of being repeated as per-service pins. Each floor is the advisory's
+# fixed release; parents accept it within their existing ranges.
+constraint-dependencies = [
+  "certifi>=2026.10.19",
+  "opentelemetry-api>=1.45.1",
+  "pillow>=13.0.0",
+  "pyjwt>=2.15.0",
+  "urllib3>=2.8.0",
+]
 
 [tool.uv.workspace]
 members = [
