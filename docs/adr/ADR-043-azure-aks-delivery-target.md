@@ -69,6 +69,28 @@ two.
 - The storage network rule allows public access in this module. Restricting it
   needs a cluster subnet and a private endpoint, which the module does not create.
 
+## Compatibility and migration
+
+The portable delivery is unaffected: `podLabels`, `podAnnotations`, and
+`serviceAccount.annotations` default to empty, the conformance values render the
+same resources, the immutable-digest rule still fails a digest-less render, and
+the `Kind` conformance path keeps running in CI. No contract, schema, or service
+interface changes with this target.
+
+A promotion moves in one direction and uses immutable inputs:
+
+1. Apply the Terraform module and record the outputs.
+2. Publish the already-scanned images to the registry and replace every
+   placeholder digest in `values-aks.yaml`.
+3. Set the service account client ID and the storage endpoint from the outputs.
+4. Install foundation, then the application chart, then verify rollout and pod
+   identity labels.
+
+Rolling back before a first successful install means deleting the resource group;
+the repository holds no state, so there is nothing to reconcile. After a real
+install, rollback is a Helm revision plus the infrastructure change that owns it.
+The module is additive: it does not modify the Compose or `Kind` paths.
+
 ## Boundaries
 
 - **This module has never been applied.** No subscription, cluster, registry, key

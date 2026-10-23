@@ -20,6 +20,9 @@ dev = [
 
 [tool.uv]
 default-groups = ["dev"]
+# botocore and requests both accept a patched urllib3; the transitive floor is
+# raised here so the dependency audit stays satisfiable without a per-service pin.
+constraint-dependencies = ["urllib3>=2.8.0"]
 
 [tool.uv.workspace]
 members = [

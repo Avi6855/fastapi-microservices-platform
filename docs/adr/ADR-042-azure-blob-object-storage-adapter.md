@@ -73,6 +73,26 @@ default local topology does not include one.
 - The adapters are still synchronous, like the existing S3 adapter; they are
   called through `asyncio.to_thread`.
 
+## Compatibility and migration
+
+The port is unchanged, so no service, contract, or schema changes with the
+provider. Migration is configuration plus a cutover check:
+
+1. Create the destination container and grant the runtime identity the access it
+   needs; `ensure_bucket` runs at startup and is idempotent.
+2. Run the compatibility suite against the destination endpoint. A suite that
+   only skips its live tests is not a cutover check.
+3. Switch `MEDIA_OBJECT_STORAGE_PROVIDER` and restart `media-service` only.
+4. Existing objects are not copied by this change. A real cutover either copies
+   and checksum-verifies objects or serves them through a deliberate
+   dual-provider window; the metadata rows keep pointing at the same keys.
+5. Rolling back is the same switch in reverse. MinIO objects stay intact, so the
+   rollback path does not depend on an Azure export.
+
+Presigned-URL clients must apply the Azure header contract described above when
+flipping providers; the runbook lists the exact difference so a client does not
+silently store `application/octet-stream`.
+
 ## Boundaries
 
 - No Azure subscription, resource group, or deployment is created or claimed by
