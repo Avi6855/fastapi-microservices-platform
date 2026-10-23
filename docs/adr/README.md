@@ -23,6 +23,8 @@ ADRs record decisions that materially affect service ownership, contracts, durab
 
 | ADR | Status | Decision |
 |---|---|---|
+| [ADR-043](ADR-043-azure-aks-delivery-target.md) | Accepted | Azure AKS delivery target, authored and never provisioned |
+| [ADR-042](ADR-042-azure-blob-object-storage-adapter.md) | Accepted | Azure Blob Storage adapter behind the object-storage port |
 | [ADR-041](ADR-041-catalog-management-and-public-product-media.md) | Accepted | Administrator-only Catalog management and public product-media delivery |
 | [ADR-040](ADR-040-post-delivery-returns-and-refund-gating.md) | Accepted | Post-delivery returns and physical-stock refund gating |
 | [ADR-039](ADR-039-shipping-ownership-extraction.md) | Accepted | Shipping ownership extraction with refund-safe fulfillment fence |

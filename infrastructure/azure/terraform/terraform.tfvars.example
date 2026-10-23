@@ -1,0 +1,16 @@
+# Copy to terraform.tfvars. The file is ignored: it is environment input, not
+# repository content, and it must never carry a credential.
+prefix      = "fastapi"
+environment = "prod"
+location    = "centralindia"
+
+# Confirm the region's supported AKS versions before the first plan; the Helm
+# charts refuse to render below their kubeVersion floor.
+kubernetes_version = "1.34"
+
+node_vm_size    = "Standard_D4s_v5"
+node_min_count  = 2
+node_max_count  = 5
+
+kubernetes_namespace = "fastapi-platform"
+service_account_name = "platform-runtime"

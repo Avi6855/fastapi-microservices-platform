@@ -1,0 +1,43 @@
+# Azure Kubernetes Service overlay, applied on top of values.yaml:
+#
+#   helm upgrade --install fastapi-platform infrastructure/helm/fastapi-platform \
+#     --namespace fastapi-platform \
+#     --values infrastructure/helm/fastapi-platform/values.yaml \
+#     --values infrastructure/helm/fastapi-platform/values-aks.yaml
+#
+# Differences from the portable delivery:
+#
+# * Images come from the platform Azure Container Registry. Nodes pull through
+#   the AKS kubelet identity, which Terraform grants `AcrPull`, so this profile
+#   has no image-pull Secret and no registry credential in the repository.
+# * Pods opt in to Azure Workload Identity. The service account annotation with
+#   the client ID lives in the foundation release's values-aks.yaml, so no
+#   credential is baked into a workload manifest.
+#
+# Every digest below is a placeholder and equal to sixty-four zeros. A delivery
+# run replaces all of them with the immutable digests produced by the ACR build.
+# Rendering this file proves structure only; it is never a deployable release.
+
+images:
+  repositoryPrefix: replacewithacr.azurecr.io/fastapi-microservices-platform
+  pullSecrets: []
+  services:
+    reference-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    identity-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    customer-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    catalog-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    search-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    media-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    inventory-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    cart-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    order-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    payment-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    shipping-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    notification-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+    chat-service: {digest: "0000000000000000000000000000000000000000000000000000000000000000", tag: ""}
+
+# Required by the Azure Workload Identity mutating webhook. It projects a
+# federated token for the annotated service account and nothing else changes in
+# the workload specification.
+podLabels:
+  azure.workload.identity/use: "true"

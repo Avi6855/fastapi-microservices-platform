@@ -2,6 +2,11 @@
 # its ConfigMap, ServiceAccount, runtime Secret, and optional registry Secret.
 serviceAccount:
   name: platform-runtime
+
+# Extra pod metadata for cloud integration, for example a workload-identity
+# opt-in label. Empty by default so the portable delivery stays provider-neutral.
+podLabels: {}
+podAnnotations: {}
 runtime:
   configMapName: platform-runtime-config
   secretName: platform-runtime-secrets

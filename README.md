@@ -91,7 +91,7 @@ The platform follows non-negotiable rules:
 2. **REST is for synchronous request/response.** **Kafka** carries durable domain facts (*what happened*). **RabbitMQ + Celery** carry executable work (*what needs to be done*).
 3. **Redis is disposable.** Cache, rate limits, session/OTP state, presence, and fan-out — never the source of business truth.
 4. **Critical events use a Transactional Outbox.** Consumers are idempotent and deduplicate through an Inbox or equivalent durable record.
-5. **Binary data lives in S3-compatible storage** behind an `ObjectStorage` port and an `S3ObjectStorage` adapter — no vendor lock-in to MinIO.
+5. **Binary data lives behind an `ObjectStorage` port with two adapters** — `S3ObjectStorage` (MinIO locally) and [`AzureBlobObjectStorage`](docs/adr/ADR-042-azure-blob-object-storage-adapter.md) — so provider portability is tested rather than assumed.
 6. **API, event schema, and service versions evolve independently.**
 7. **Workloads are Kubernetes-first**, even while local development runs on Compose.
 
@@ -130,9 +130,9 @@ Each service directory contains its own `README.md`, `src/`, `tests/`, migration
 | Persistence | PostgreSQL 18.6, SQLAlchemy 2.0, Alembic 1.19 (one owner per schema) |
 | Messaging | Apache Kafka 4.2 (KRaft) via `aiokafka`; RabbitMQ 4.3 with Celery 5.6 |
 | Ephemeral state | Redis 8.10 — cache, rate limits, presence, WebSocket fan-out |
-| Object storage | S3-compatible API (MinIO locally) through an `ObjectStorage` port |
+| Object storage | S3-compatible API (MinIO locally) and Azure Blob (Azurite locally) through one `ObjectStorage` port |
 | Edge | Nginx 1.30 with TLS termination, rate limits, and WebSocket proxying |
-| Delivery | Docker Compose locally; Kubernetes manifests + Helm charts; disposable `Kind` conformance cluster |
+| Delivery | Docker Compose locally; Kubernetes manifests + Helm charts; disposable `Kind` conformance cluster; an Azure AKS target defined in reviewed Terraform and never provisioned |
 | Observability | OpenTelemetry Collector 0.159, Prometheus 3.14, Loki 3.7, Tempo 2.9, Grafana 13.1 |
 | Quality tooling | pytest 9.1, mypy (strict), Ruff, pip-audit, Trivy image scanning |
 
@@ -342,8 +342,8 @@ Operational runbooks: [docs/runbooks/](docs/runbooks/).
 services/       13 independently deployable bounded contexts + documented service template
 libs/           platform-auth, platform-messaging, platform-observability (technical primitives only)
 contracts/      canonical OpenAPI and JSON Schema event artifacts (49 files)
-infrastructure/ Compose, edge gateway, MinIO, Kubernetes, Helm, observability
-docs/           111 documents: architecture, 41 ADRs, diagrams, events, runbooks, phase plans
+infrastructure/ Compose, edge gateway, MinIO, Kubernetes, Helm, Azure Terraform, observability
+docs/           115 documents: architecture, 43 ADRs, diagrams, events, runbooks, phase plans
 scripts/        repeatable developer, migration, and delivery automation
 tests/e2e/      cross-service workflow tests
 .github/        CI/CD workflows
@@ -403,7 +403,7 @@ This project was built as a focused demonstration of the skills an **Application
 | **Observability and debugging** | Probes, structured logs, Prometheus metrics, OpenTelemetry traces, Grafana dashboards, and per-incident runbooks |
 | **Security fundamentals** | Hashed credentials, short-lived tokens, inter-service authorization, secret handling, and image vulnerability gating |
 | **CI/CD and cloud-native delivery** | Automated gate chain, disposable `Kind` conformance cluster, Helm packaging, immutable scanned images |
-| **Technical communication** | 41 ADRs, 111 documents, diagrams, runbooks, and a claim-to-evidence reviewer guide |
+| **Technical communication** | 43 ADRs, 115 documents, diagrams, runbooks, and a claim-to-evidence reviewer guide |
 
 ---
 

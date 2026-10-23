@@ -1,0 +1,27 @@
+# Azure Kubernetes Service overlay for the foundation release, applied on top of
+# values.yaml. Install it before the application chart:
+#
+#   helm upgrade --install platform-foundation \
+#     infrastructure/helm/fastapi-platform-foundation \
+#     --namespace fastapi-platform --create-namespace \
+#     --values infrastructure/helm/fastapi-platform-foundation/values.yaml \
+#     --values infrastructure/helm/fastapi-platform-foundation/values-aks.yaml
+#
+# The client ID comes from `terraform output workload_identity_client_id`. It is
+# public metadata, not a credential: the federated trust is bound to this exact
+# namespace and service account, and the identity only holds `Key Vault Secrets
+# User` plus `AcrPull` on the platform resources.
+
+serviceAccount:
+  annotations:
+    azure.workload.identity/client-id: replace-with-workload-identity-client-id
+
+runtimeConfig:
+  # Object storage for Media moves to Azure Blob through the adapter decision in
+  # ADR-042. The account key is not configuration: it belongs in the runtime
+  # Secret, projected from Key Vault.
+  MEDIA_OBJECT_STORAGE_PROVIDER: azure
+  MEDIA_AZURE_STORAGE_ACCOUNT_URL: https://replacewithstorageaccount.blob.core.windows.net
+  MEDIA_AZURE_STORAGE_CONTAINER: fastapi-platform-media
+  # Order invoice storage still uses its own S3 adapter and is not part of this
+  # profile; see the ADR-042 boundary before enabling reconciliation here.

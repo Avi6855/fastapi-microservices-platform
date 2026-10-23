@@ -94,6 +94,23 @@ services:
       timeout: 10s
       retries: 12
 
+  azurite:
+    # Opt-in: supports the Azure Blob adapter and its provider-compatibility
+    # tests. It is not part of the default topology, so MinIO stays the local
+    # default. Start it with `--profile azure-blob`.
+    image: mcr.microsoft.com/azure-storage/azurite:3.37.0
+    profiles: [azure-blob]
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--skipApiVersionCheck"]
+    ports:
+      - "127.0.0.1:10000:10000"
+    volumes:
+      - azurite-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10000"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   mailpit:
     image: axllent/mailpit:v1.30.0
     ports:
@@ -245,6 +262,14 @@ services:
     environment:
       <<: *observability-environment
       MEDIA_ENVIRONMENT: local
+      # Object storage provider switch: s3 (default) or azure. Azure values stay
+      # inert until MEDIA_OBJECT_STORAGE_PROVIDER is set to azure.
+      MEDIA_OBJECT_STORAGE_PROVIDER: ${MEDIA_OBJECT_STORAGE_PROVIDER:-s3}
+      MEDIA_AZURE_STORAGE_ACCOUNT_URL: ${MEDIA_AZURE_STORAGE_ACCOUNT_URL:-}
+      MEDIA_AZURE_STORAGE_ACCOUNT_NAME: ${MEDIA_AZURE_STORAGE_ACCOUNT_NAME:-}
+      MEDIA_AZURE_STORAGE_ACCOUNT_KEY: ${MEDIA_AZURE_STORAGE_ACCOUNT_KEY:-}
+      MEDIA_AZURE_STORAGE_CONTAINER: ${MEDIA_AZURE_STORAGE_CONTAINER:-fastapi-platform-media}
+      MEDIA_AZURE_STORAGE_PUBLIC_ENDPOINT_URL: ${MEDIA_AZURE_STORAGE_PUBLIC_ENDPOINT_URL:-}
       MEDIA_DATABASE_URL: postgresql+asyncpg://media_service:media-local-only@postgres:5432/media_service
       MEDIA_JWT_SECRET: local-development-jwt-secret-change-me-32-bytes
       MEDIA_CHAT_ACCESS_SECRET: local-development-chat-media-access-secret-change-me-32-bytes
@@ -762,6 +787,7 @@ volumes:
   rabbitmq-data:
   redis-data:
   minio-data:
+  azurite-data:
   observability-prometheus-data:
   observability-loki-data:
   observability-tempo-data:

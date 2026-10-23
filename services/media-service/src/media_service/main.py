@@ -36,7 +36,7 @@ from media_service.schemas import (
     UploadAuthorization,
     UploadRequest,
 )
-from media_service.storage import S3ObjectStorage
+from media_service.storage import build_object_storage
 from media_service.workers.outbox_publisher import run_outbox_publisher
 from media_service.workers.task_dispatcher import run_task_dispatcher
 from platform_auth import AuthClaims
@@ -44,7 +44,7 @@ from platform_observability import configure_application, metrics_response
 
 settings = get_settings()
 logger = logging.getLogger(settings.service_name)
-storage = S3ObjectStorage(settings)
+storage = build_object_storage(settings)
 catalog_gateway = HttpCatalogMediaGateway(settings)
 
 

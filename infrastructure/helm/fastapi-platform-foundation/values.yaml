@@ -3,6 +3,8 @@
 # before it can apply chart resources.
 serviceAccount:
   name: platform-runtime
+  # Extra annotations, for example a cloud workload-identity client ID.
+  annotations: {}
 
 runtimeConfig:
   PLATFORM_ENVIRONMENT: production

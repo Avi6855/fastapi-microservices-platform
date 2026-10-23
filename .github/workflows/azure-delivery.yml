@@ -1,0 +1,139 @@
+name: Azure delivery rehearsal
+
+# Status: authored and statically validated, never executed against a
+# subscription. See docs/adr/ADR-043-azure-aks-delivery-target.md.
+#
+# The workflow is manual because a public portfolio repository has no standing
+# Azure credentials, and an automatic path would be an unproven claim. The
+# `plan` job authenticates with a federated OIDC token: it needs the federation
+# variables below and no client secret. Nothing in this file can apply.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_plan:
+        description: Run terraform plan with the configured subscription
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-delivery-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate Terraform and Azure Helm overlays
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install verified Terraform v1.9.8
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=1.9.8
+          archive_name=terraform_${version}_linux_amd64.zip
+          archive="$RUNNER_TEMP/$archive_name"
+          curl --fail --location --retry 3 --output "$archive" \
+            "https://releases.hashicorp.com/terraform/${version}/${archive_name}"
+          echo "186e0145f5e5f2eb97cbd785bc78f21bae4ef15119349f6ad4fa535b83b10df8  $archive" | sha256sum --check
+          mkdir --parents --mode=0755 "$RUNNER_TEMP/terraform"
+          unzip -o -q "$archive" -d "$RUNNER_TEMP/terraform"
+          install --mode=0755 "$RUNNER_TEMP/terraform/terraform" "$HOME/.local/bin/terraform"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          terraform version
+
+      - name: Install verified Helm v4.2.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm_tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$helm_tmp_dir"' EXIT
+          archive_name=helm-v4.2.4-linux-amd64.tar.gz
+          archive="$helm_tmp_dir/$archive_name"
+          curl --fail --location --retry 3 --output "$archive" "https://get.helm.sh/$archive_name"
+          echo "c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3  $archive" | sha256sum --check
+          tar --extract --gzip --file "$archive" --directory "$helm_tmp_dir"
+          install --mode=0755 "$helm_tmp_dir/linux-amd64/helm" "$HOME/.local/bin/helm"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          helm version
+
+      - name: Validate Terraform formatting and configuration
+        run: |
+          set -euo pipefail
+          terraform fmt -check -recursive infrastructure/azure/terraform
+          terraform -chdir=infrastructure/azure/terraform init -backend=false -input=false
+          terraform -chdir=infrastructure/azure/terraform validate
+
+      - name: Render the Azure Helm overlays
+        run: |
+          set -euo pipefail
+          helm lint infrastructure/helm/fastapi-platform-foundation --strict \
+            --values infrastructure/helm/fastapi-platform-foundation/values.yaml \
+            --values infrastructure/helm/fastapi-platform-foundation/values-aks.yaml
+          helm lint infrastructure/helm/fastapi-platform --strict \
+            --values infrastructure/helm/fastapi-platform/values.yaml \
+            --values infrastructure/helm/fastapi-platform/values-aks.yaml
+          helm template platform-foundation infrastructure/helm/fastapi-platform-foundation \
+            --namespace fastapi-platform \
+            --values infrastructure/helm/fastapi-platform-foundation/values.yaml \
+            --values infrastructure/helm/fastapi-platform-foundation/values-aks.yaml >/dev/null
+          helm template fastapi-platform infrastructure/helm/fastapi-platform \
+            --namespace fastapi-platform \
+            --values infrastructure/helm/fastapi-platform/values.yaml \
+            --values infrastructure/helm/fastapi-platform/values-aks.yaml >/dev/null
+
+  plan:
+    name: Plan the Azure target (federated login, no secret)
+    if: inputs.run_plan
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: azure-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install verified Terraform v1.9.8
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=1.9.8
+          archive_name=terraform_${version}_linux_amd64.zip
+          archive="$RUNNER_TEMP/$archive_name"
+          curl --fail --location --retry 3 --output "$archive" \
+            "https://releases.hashicorp.com/terraform/${version}/${archive_name}"
+          echo "186e0145f5e5f2eb97cbd785bc78f21bae4ef15119349f6ad4fa535b83b10df8  $archive" | sha256sum --check
+          mkdir --parents --mode=0755 "$RUNNER_TEMP/terraform"
+          unzip -o -q "$archive" -d "$RUNNER_TEMP/terraform"
+          install --mode=0755 "$RUNNER_TEMP/terraform/terraform" "$HOME/.local/bin/terraform"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          terraform version
+
+      - name: Sign in with a federated identity
+        uses: azure/login@a65d910e8af852a8061c627c456678983e180302 # v2.2.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Plan the Azure target
+        run: |
+          set -euo pipefail
+          # No remote backend is configured yet, so this plan uses disposable
+          # local state. Apply stays out of the repository until an owned state
+          # backend exists and a promotion process owns the change.
+          terraform -chdir=infrastructure/azure/terraform init -backend=false -input=false
+          terraform -chdir=infrastructure/azure/terraform plan -input=false -no-color

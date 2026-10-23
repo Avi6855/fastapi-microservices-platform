@@ -27,6 +27,13 @@ spec:
         app.kubernetes.io/name: {{ $name }}
         app.kubernetes.io/part-of: fastapi-microservices-platform
         platform.fastapi.io/workload: api
+      {{- with $.Values.podLabels }}
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.podAnnotations }}
+      annotations:
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: {{ $.Values.serviceAccount.name }}
       automountServiceAccountToken: false

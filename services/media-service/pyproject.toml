@@ -7,6 +7,7 @@ dependencies = [
   "aiokafka>=0.14,<0.15",
   "alembic>=1.19.1,<2",
   "asyncpg>=0.31,<0.32",
+  "azure-storage-blob>=12.27,<13",
   "boto3>=1.43.79,<2",
   "celery>=5.6.3,<6",
   "fastapi>=0.141.1,<0.142",

@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from uuid import UUID
 
-from botocore.exceptions import BotoCoreError  # type: ignore[import-untyped]
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
 
@@ -18,7 +17,7 @@ from media_service.application import (
 from media_service.config import get_settings
 from media_service.db import dispose_engine, get_session_factory
 from media_service.models import MediaAsset, MediaDerivative, OutboxMessage
-from media_service.storage import S3ObjectStorage
+from media_service.storage import STORAGE_TRANSIENT_ERRORS, build_object_storage
 from media_service.workers.celery_app import celery_app
 
 
@@ -33,7 +32,7 @@ def _thumbnail(data: bytes) -> tuple[bytes, int, int]:
 
 async def process_media_asset(media_asset_id: UUID) -> None:
     settings = get_settings()
-    storage = S3ObjectStorage(settings)
+    storage = build_object_storage(settings)
     async with get_session_factory()() as db:
         asset = await db.get(MediaAsset, media_asset_id)
         if asset is None or asset.status == "ready" or asset.deleted_at is not None:
@@ -124,7 +123,7 @@ def process_asset_task(self: object, *, media_asset_id: str) -> None:
 
 async def delete_media_asset(media_asset_id: UUID) -> None:
     settings = get_settings()
-    storage = S3ObjectStorage(settings)
+    storage = build_object_storage(settings)
     async with get_session_factory()() as db:
         candidate = await load_cleanup_candidate(db, asset_id=media_asset_id)
     if candidate is None:
@@ -144,7 +143,7 @@ async def _delete_and_dispose(media_asset_id: UUID) -> None:
 @celery_app.task(
     name="media_service.delete_asset",
     bind=True,
-    autoretry_for=(BotoCoreError, ConnectionError),
+    autoretry_for=STORAGE_TRANSIENT_ERRORS,
     retry_backoff=True,
     retry_jitter=True,
     retry_kwargs={"max_retries": 5},

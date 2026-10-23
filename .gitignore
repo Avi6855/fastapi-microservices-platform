@@ -27,6 +27,12 @@ build/
 *.pem
 *.key
 
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
 # IDE and OS
 .idea/
 .vscode/

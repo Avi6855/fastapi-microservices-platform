@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,6 +26,14 @@ class Settings(BaseSettings):
     s3_secret_access_key: str = "minio-local-only"
     s3_bucket: str = "fastapi-platform-media"
     s3_region: str = "us-east-1"
+    object_storage_provider: Literal["s3", "azure"] = "s3"
+    azure_storage_account_url: str = ""
+    azure_storage_account_name: str = ""
+    azure_storage_account_key: str = ""
+    azure_storage_container: str = "fastapi-platform-media"
+    # Present when clients must reach a different origin than the service does,
+    # for example an Azurite container published on the host loopback address.
+    azure_storage_public_endpoint_url: str = ""
     upload_url_ttl_seconds: int = Field(default=300, ge=60, le=3600)
     chat_access_secret: str = Field(
         default="local-development-chat-media-access-secret-change-me-32-bytes", min_length=32
@@ -64,6 +73,7 @@ class Settings(BaseSettings):
             values={
                 "jwt_secret": self.jwt_secret,
                 "s3_secret_access_key": self.s3_secret_access_key,
+                "azure_storage_account_key": self.azure_storage_account_key or None,
                 "chat_access_secret": self.chat_access_secret,
                 "catalog_access_secret": self.catalog_access_secret,
                 "rabbitmq_url": self.rabbitmq_url,

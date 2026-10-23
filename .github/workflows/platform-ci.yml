@@ -92,6 +92,13 @@ jobs:
             exit 1
           fi
           grep --fixed-strings "immutable release digest" /tmp/helm-default-render.out >/dev/null
+          # The Azure overlays must render too. This proves structure only: the
+          # digests in values-aks.yaml are placeholders and no Azure resource
+          # exists behind them.
+          helm lint infrastructure/helm/fastapi-platform-foundation --strict --values infrastructure/helm/fastapi-platform-foundation/values.yaml --values infrastructure/helm/fastapi-platform-foundation/values-aks.yaml
+          helm lint infrastructure/helm/fastapi-platform --strict --values infrastructure/helm/fastapi-platform/values.yaml --values infrastructure/helm/fastapi-platform/values-aks.yaml
+          helm template platform-foundation infrastructure/helm/fastapi-platform-foundation --namespace fastapi-platform --values infrastructure/helm/fastapi-platform-foundation/values.yaml --values infrastructure/helm/fastapi-platform-foundation/values-aks.yaml >/dev/null
+          helm template fastapi-platform infrastructure/helm/fastapi-platform --namespace fastapi-platform --values infrastructure/helm/fastapi-platform/values.yaml --values infrastructure/helm/fastapi-platform/values-aks.yaml >/dev/null
 
       - name: Validate lock, formatting, linting, typing, and unit tests
         run: |

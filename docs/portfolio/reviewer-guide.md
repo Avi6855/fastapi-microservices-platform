@@ -29,6 +29,13 @@ Use the following path for a focused review:
    [Kind Job](../../infrastructure/kubernetes/conformance/e2e/checkout-e2e.yaml).
 7. Inspect the [Kubernetes conformance ADR](../adr/ADR-028-kubernetes-conformance-ci.md)
    and the [platform workflow](../../.github/workflows/platform-ci.yml).
+8. Inspect the [Azure Blob adapter ADR](../adr/ADR-042-azure-blob-object-storage-adapter.md)
+   against the [object-storage port](../../services/media-service/src/media_service/storage.py)
+   and its [compatibility suite](../../services/media-service/tests/test_azure_blob_storage.py).
+9. Read the [Azure AKS delivery ADR](../adr/ADR-043-azure-aks-delivery-target.md), the
+   [Terraform module](../../infrastructure/azure/terraform/main.tf), and the
+   [Azure Helm overlays](../../infrastructure/helm/fastapi-platform/values-aks.yaml).
+   This target is validated and rendered in CI, and has never been provisioned.
 
 ## Evidence map
 
@@ -42,6 +49,8 @@ Use the following path for a focused review:
 | Shipment lifecycle is independently owned without opening a refund race | [Shipping ownership ADR](../adr/ADR-039-shipping-ownership-extraction.md), [Shipping command contract](../../contracts/openapi/shipping-commands.v1.openapi.json), and [Shipping E2E](../../tests/e2e/test_phase18_shipping.py) | Shipping commits an authorization-bound transition and emits a no-PII fact; Order applies the customer-facing projection only after its local fence matches. |
 | A delivered return cannot restore stock before physical receipt or silently retry a provider reversal | [Return ADR](../adr/ADR-040-post-delivery-returns-and-refund-gating.md), [return contract](../../contracts/openapi/order-returns.v1.openapi.json), [reconciliation runbook](../runbooks/post-delivery-returns.md), and [portable Compose/Kind E2E](../../tests/e2e/returns_workflow.py) | Receipt writes independent Inventory and Payment handoffs atomically in Order; Inventory restores once and an unsupported provider outcome remains an auditable failure. |
 | Kubernetes resources are executable rather than documentation-only | [Kubernetes conformance ADR](../adr/ADR-028-kubernetes-conformance-ci.md), [conformance script](../../scripts/run_kubernetes_conformance.sh), and [workflow](../../.github/workflows/platform-ci.yml) | CI creates a disposable `Kind` cluster, applies the release path, and proves API and checkout workflow behavior in-cluster. |
+| A managed-cluster target can be reviewed as code, without pretending it runs | [Azure AKS delivery ADR](../adr/ADR-043-azure-aks-delivery-target.md), [Terraform module](../../infrastructure/azure/terraform/main.tf), and [Azure overlays](../../infrastructure/helm/fastapi-platform/values-aks.yaml) | Identity, registry, secret-store, and storage access are explicit resources with a pinned provider; `terraform validate` and `helm lint`/`template` prove the configuration is well-formed, and the ADR states plainly that nothing was applied. |
+| Object storage can change provider without changing business logic | [Azure Blob adapter ADR](../adr/ADR-042-azure-blob-object-storage-adapter.md), [port and adapters](../../services/media-service/src/media_service/storage.py), and [compatibility suite](../../services/media-service/tests/test_azure_blob_storage.py) | One port has two implementations; presigned transfer, content-type handling, and idempotent deletion are exercised against a real Blob endpoint rather than asserted. |
 | Published images pass the same security gate | [single-job publication ADR](../adr/ADR-038-single-job-ghcr-publication.md), [delivery scan-gate test](../../tests/test_ci_delivery_scan_gate.py), and [runtime image hardening test](../../tests/test_runtime_image_hardening.py) | Every exact image is built and scanned for `HIGH`/`CRITICAL` findings before one registry login or push. |
 
 ## How to reproduce evidence
@@ -72,6 +81,12 @@ one sequential `GHCR` job only after every scan succeeds.
   access policy, and a promotion/rollback process.
 - The Zarinpal and Zibal integrations use local/test configuration only; no
   claim is made that a real merchant transaction has run.
+- The Azure Blob adapter is verified against Azurite only. No Azure subscription,
+  storage account, or deployment exists behind it, and managed-identity signing
+  is not implemented.
+- The Azure AKS delivery target is authored configuration. It has never been
+  applied or planned against a subscription, and its image digests, service
+  account client ID, and storage endpoint are explicit placeholders.
 - Shipping owns the implemented shipment lifecycle, but carrier labels,
   webhooks, rate shopping, delivery estimates, address validation,
   carrier-managed reverse logistics, and third-party carrier integration remain
