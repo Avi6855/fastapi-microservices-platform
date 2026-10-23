@@ -4,7 +4,7 @@
 
 **A production-shaped, event-driven e-commerce backend delivered as 13 independently deployable services.**
 
-Python 3.14 · FastAPI · PostgreSQL · Kafka · RabbitMQ · Redis · S3 · Kubernetes
+Python 3.14 · FastAPI · PostgreSQL · Kafka · RabbitMQ · Redis · S3 · Azure · Kubernetes · Go
 
 [Overview](#overview) · [Architecture](#architecture) · [Services](#service-catalog) · [Quick start](#quick-start) · [Evidence](#engineering-competencies) · [Docs](#documentation)
 
@@ -18,7 +18,7 @@ This repository is a **backend-only distributed system**, not a collection of Fa
 
 E-commerce is used as a realistic vehicle for the problems that matter in production software — distributed consistency, idempotency, failure recovery, observability, security boundaries, and independent delivery — rather than as an excuse to expose as many endpoints as possible.
 
-The platform has completed **20 delivery phases (0–19)** and is verified locally with Docker Compose and in CI with a disposable Kubernetes (`Kind`) cluster. It is deliberately a portfolio repository: CI publishes immutable, scanned container images as build artifacts, but no public production environment is claimed.
+The platform has completed **22 delivery phases (0–21)** and is verified locally with Docker Compose and in CI with a disposable Kubernetes (`Kind`) cluster. Two independent providers sit behind the object-storage port, a reviewed Terraform target describes how the platform would run on Azure, and a Go tool proves that the media bucket can be restored rather than merely copied. It is deliberately a portfolio repository: CI publishes immutable, scanned container images as build artifacts, but no public production environment is claimed.
 
 > **Reviewer entry point:** [docs/portfolio/reviewer-guide.md](docs/portfolio/reviewer-guide.md) maps every material claim in this README to its implementation, contract, runbook, or executable CI evidence.
 
@@ -31,6 +31,7 @@ The platform has completed **20 delivery phases (0–19)** and is verified local
 - [Service catalog](#service-catalog)
 - [Technology stack](#technology-stack)
 - [Reliability and consistency](#reliability-and-consistency)
+- [Cloud portability, delivery target, and restore drill](#cloud-portability-delivery-target-and-restore-drill)
 - [Security model](#security-model)
 - [Observability](#observability)
 - [Testing and quality gates](#testing-and-quality-gates)
@@ -155,6 +156,45 @@ The interesting engineering in this repository is what happens when something go
 
 ---
 
+## Cloud portability, delivery target, and restore drill
+
+Three artefacts make the cloud story reviewable instead of rhetorical. Each one states what it proves and what it does not.
+
+### One storage port, two providers
+
+`media-service` depends on an `ObjectStorage` port with two adapters: `S3ObjectStorage` (MinIO locally) and `AzureBlobObjectStorage`. Provider is configuration (`MEDIA_OBJECT_STORAGE_PROVIDER`), business logic is untouched, and a compatibility suite runs a full round trip, presigned upload, presigned download, and idempotent deletion against a real Blob endpoint.
+
+```bash
+docker compose --profile azure-blob up -d azurite
+MEDIA_AZURE_STORAGE_LIVE=1 uv run --package media-service pytest \
+  services/media-service/tests/test_azure_blob_storage.py
+```
+
+The two providers are not identical: Azure requires `x-ms-blob-type` and stores the content type from `x-ms-blob-content-type`, while S3 uses the request header. That difference is recorded in the [ADR](docs/adr/ADR-042-azure-blob-object-storage-adapter.md) and the [runbook](docs/runbooks/azure-blob-storage.md) rather than discovered in production.
+
+### A reviewed Azure delivery target
+
+[`infrastructure/azure/terraform`](infrastructure/azure/terraform/main.tf) defines AKS with OIDC and workload identity, an ACR with its admin account disabled, a Key Vault using RBAC, a blob account with versioning and delete retention, and a user-assigned identity federated to `system:serviceaccount:fastapi-platform:platform-runtime`. Two Helm overlays adapt the existing charts: images come from ACR, no pull secret exists, and pods opt in to workload identity through generic `podLabels` and `serviceAccount.annotations` values.
+
+[`azure-delivery.yml`](.github/workflows/azure-delivery.yml) validates the module and renders both overlays on demand, and can run a federated `terraform plan` with no client secret. It never applies.
+
+> **Boundary:** no subscription was ever used. The module has not been applied or planned, every image digest in `values-aks.yaml` is a placeholder, and the service account client ID and storage endpoint are explicit `replace-with-...` values. See [ADR-043](docs/adr/ADR-043-azure-aks-delivery-target.md).
+
+### A restore that is proven, not assumed
+
+[`tools/backupctl`](tools/backupctl/README.md) is a Go command that snapshots an S3-compatible bucket into `snapshots/<id>/objects/<key>` plus a versioned, checksummed `manifest.json`. It reads every copy back before recording it, reports every mismatch on verification, and refuses to restore bytes that disagree with the manifest.
+
+```bash
+cd tools/backupctl && go build -o /tmp/backupctl .
+/tmp/backupctl backup  --source media --backup media-backups --snapshot drill-1
+/tmp/backupctl verify  --backup media-backups --snapshot drill-1
+/tmp/backupctl restore --backup media-backups --snapshot drill-1 --target media-restored --dry-run
+```
+
+The drill was executed against the repository's pinned MinIO image, including the destructive step: seed three objects, snapshot, delete every source object, restore, then compare each restored SHA-256 and content type with the original. Corrupting one backup object made `verify` fail with the object name and `restore` refuse to run. Boundaries are explicit in [ADR-044](docs/adr/ADR-044-verified-object-storage-backup-drill.md): S3-compatible endpoints only, media bucket scope, no scheduler or retention executor.
+
+---
+
 ## Security model
 
 - Passwords and refresh tokens are stored hashed; access tokens are short-lived and verified per request.
@@ -186,12 +226,13 @@ The local `observability` profile is bounded and opt-in: [infrastructure/observa
 
 | Layer | What it proves |
 |---|---|
-| Unit and service tests (85 test modules) | Domain rules, validation, authorization, idempotency, and error paths per service |
+| Unit and service tests (88 test modules) | Domain rules, validation, authorization, idempotency, and error paths per service |
 | Contract tests | OpenAPI and event schemas in `contracts/` stay compatible with implementations |
 | Integration tests | Real PostgreSQL, Kafka, RabbitMQ, Redis, and S3 adapters — not mocks of the platform |
 | Cross-service E2E | Checkout → invoice → email, shipping projection, resilience, and post-delivery returns |
 | Kubernetes conformance | Helm release into a disposable `Kind` cluster, controlled migrations, in-cluster API and workflow proof |
 | Static and security gates | Ruff, strict mypy, `uv lock --check`, pip-audit, Trivy image scan, structural validation |
+| Provider and drill tests | Azure Blob compatibility suite against Azurite, Go unit tests for backup, verify, and restore, plus structural checks on the Terraform target |
 
 ```bash
 uv run --all-packages pytest -m "not e2e" -q     # fast, hermetic suite
@@ -212,6 +253,8 @@ E2E suites are opt-in and require a running topology. Strategy: [docs/developmen
 3. **Compose E2E** — the full local topology proves checkout, invoice, notification, shipping, and returns.
 4. **Kubernetes conformance** — a disposable `Kind` cluster installs the Helm charts, waits for controlled migrations and workloads, then proves API readiness and in-cluster workflows.
 5. **Image delivery** — exact service images are built, scanned for `HIGH`/`CRITICAL` findings, and published to GHCR in one sequential gate, so nothing reaches the registry unscanned.
+6. **Backup tool** — a checksum-pinned Go toolchain runs `gofmt`, `go vet`, `go test`, and `go build` on `tools/backupctl`.
+7. **Azure rehearsal** — a separate manual workflow validates the Terraform module and renders the Azure overlays; it never applies.
 
 Delivery rationale: [docs/development/ci-cd.md](docs/development/ci-cd.md) and [ADR-038](docs/adr/ADR-038-single-job-ghcr-publication.md).
 
@@ -309,6 +352,20 @@ curl -k https://localhost/docs/   # edge gateway is serving
 
 Optional telemetry stack: [infrastructure/observability/README.md](infrastructure/observability/README.md).
 
+### 7. Optional provider and drill checks
+
+Neither of these touches the default topology: the `azure-blob` Compose profile is opt-in, and the drill runs as a local binary.
+
+```bash
+# Azure Blob provider compatibility (Azurite on 127.0.0.1:10000)
+docker compose --profile azure-blob up -d azurite
+MEDIA_AZURE_STORAGE_LIVE=1 uv run --package media-service pytest \
+  services/media-service/tests/test_azure_blob_storage.py
+
+# Backup and restore drill (Go 1.27; see docs/runbooks/object-storage-backup-restore.md)
+cd tools/backupctl && go test ./... -count=1 && go build -o /tmp/backupctl .
+```
+
 ---
 
 ## Common operations
@@ -332,6 +389,17 @@ Opt-in E2E run against the local topology:
 ```powershell
 $env:RUN_E2E = "1"; uv run pytest tests/e2e/test_phase6_checkout_notification.py
 ```
+
+Back up and verify the media bucket, then rehearse a restore into a new bucket:
+
+```bash
+export BACKUPCTL_ENDPOINT=127.0.0.1:9000 BACKUPCTL_ACCESS_KEY=... BACKUPCTL_SECRET_KEY=...
+/tmp/backupctl backup  --source fastapi-platform-media --backup media-backups
+/tmp/backupctl verify  --backup media-backups --snapshot <id>
+/tmp/backupctl restore --backup media-backups --snapshot <id> --target media-restored --dry-run
+```
+
+Azure provider runs and the delivery rehearsal have their own runbooks: [Azure Blob storage](docs/runbooks/azure-blob-storage.md) and [Azure AKS delivery](docs/runbooks/azure-aks-delivery.md).
 
 Operational runbooks: [docs/runbooks/](docs/runbooks/).
 
@@ -359,13 +427,13 @@ Full layout: [docs/architecture/repository-structure.md](docs/architecture/repos
 
 **Architecture** — [overview](docs/architecture/overview.md) · [communication and consistency](docs/architecture/communication-and-consistency.md) · [service boundaries](docs/architecture/service-boundaries.md) · [security baseline](docs/architecture/security-baseline.md) · [observability](docs/architecture/observability.md) · [diagrams](docs/diagrams/README.md)
 
-**Decisions** — [Architecture Decision Records](docs/adr/README.md) (41 records covering transport roles, consistency, identity, payments, shipping, delivery, and scaling)
+**Decisions** — [Architecture Decision Records](docs/adr/README.md) (44 records covering transport roles, consistency, identity, payments, shipping, delivery, scaling, cloud portability, and data protection)
 
 **Contracts** — [event contracts](docs/events/README.md) · [OpenAPI catalog](contracts/README.md)
 
 **Engineering practice** — [coding standards](docs/development/coding-standards.md) · [dependency policy](docs/development/dependency-policy.md) · [testing strategy](docs/development/testing-strategy.md) · [CI/CD strategy](docs/development/ci-cd.md)
 
-**Operations** — [Kubernetes deployment](docs/runbooks/kubernetes-deployment.md) · [Helm charts](infrastructure/helm/README.md) · [post-delivery returns](docs/runbooks/post-delivery-returns.md) · [payment routing](docs/runbooks/online-payment-provider-routing.md) · [invoice and notification](docs/runbooks/invoice-notification.md) · [SMS OTP](docs/runbooks/sms-otp.md) · [staff operations](docs/runbooks/admin-operations.md) · [search projection](docs/runbooks/search-projection.md) · [edge gateway](docs/runbooks/edge-gateway.md)
+**Operations** — [Kubernetes deployment](docs/runbooks/kubernetes-deployment.md) · [Helm charts](infrastructure/helm/README.md) · [post-delivery returns](docs/runbooks/post-delivery-returns.md) · [payment routing](docs/runbooks/online-payment-provider-routing.md) · [invoice and notification](docs/runbooks/invoice-notification.md) · [SMS OTP](docs/runbooks/sms-otp.md) · [staff operations](docs/runbooks/admin-operations.md) · [search projection](docs/runbooks/search-projection.md) · [edge gateway](docs/runbooks/edge-gateway.md) · [Azure Blob storage](docs/runbooks/azure-blob-storage.md) · [Azure AKS delivery](docs/runbooks/azure-aks-delivery.md) · [backup and restore drill](docs/runbooks/object-storage-backup-restore.md)
 
 **Review** — [portfolio reviewer guide](docs/portfolio/reviewer-guide.md)
 
@@ -384,6 +452,8 @@ Full layout: [docs/architecture/repository-structure.md](docs/architecture/repos
 | 16–17 | Online payment provider routing, portfolio evidence and reviewer guide |
 | 18 | Shipping ownership extraction |
 | 19 | Post-delivery returns and refund lifecycle |
+| 20 | Azure Blob provider adapter, reviewed AKS delivery target, and a clean dependency-audit gate |
+| 21 | Verified object-storage backup and restore drill (`backupctl`) |
 
 Each phase has an approved plan under [docs/development/](docs/development/), plus the ADRs it introduced.
 
@@ -400,11 +470,13 @@ This project was built as a focused demonstration of the skills an **Application
 | **Distributed systems reasoning** | Transactional Outbox, Inbox deduplication, at-least-once delivery, Saga compensation, ordering keys, and dead-letter policy |
 | **Asynchronous processing** | Kafka domain events, RabbitMQ/Celery workers with retry, backoff, jitter, maximum attempts, and idempotency |
 | **Reliability under failure** | Resilience E2E suite, Redis degradation path, payment-outcome fencing, receipt-gated returns |
-| **Testing discipline** | 85 test modules across unit, contract, integration, and cross-service E2E layers |
+| **Testing discipline** | 88 test modules across unit, contract, integration, and cross-service E2E layers, plus Go tests for the backup tool |
 | **Performance and scale awareness** | Stateless API pods, caching and rate limiting in Redis, read-optimised search projection, horizontal autoscaling policy |
 | **Observability and debugging** | Probes, structured logs, Prometheus metrics, OpenTelemetry traces, Grafana dashboards, and per-incident runbooks |
 | **Security fundamentals** | Hashed credentials, short-lived tokens, inter-service authorization, secret handling, and image vulnerability gating |
-| **CI/CD and cloud-native delivery** | Automated gate chain, disposable `Kind` conformance cluster, Helm packaging, immutable scanned images |
+| **CI/CD and cloud-native delivery** | Automated gate chain, disposable `Kind` conformance cluster, Helm packaging, immutable scanned images, Terraform for a managed-cluster target, and a federated OIDC rehearsal with no client secret |
+| **Cloud portability** | One `ObjectStorage` port with S3 and Azure Blob adapters, a live provider-compatibility suite, and provider-specific behaviour documented next to the code |
+| **Data protection and recovery** | Go backup tool with a versioned checksummed manifest, read-back verification on write and restore, corruption refusal, and a destructive restore drill executed against real storage |
 | **Technical communication** | 44 ADRs, 117 documents, diagrams, runbooks, and a claim-to-evidence reviewer guide |
 
 ---
@@ -418,6 +490,9 @@ Documented boundaries, stated explicitly rather than hidden behind placeholders:
 - Payment adapters run against sandbox/test configuration; no claim is made that a live merchant transaction has occurred.
 - Carrier integration (labels, webhooks, rate shopping, address validation, reverse logistics) is out of scope; Shipping owns the internal shipment lifecycle.
 - A real target environment still requires owned secrets, an ingress/TLS issuer, managed durable dependencies, egress policy, retention, access control, and a promotion/rollback process.
+- The Azure AKS target is authored configuration. It has never been applied or planned against a subscription, its image digests are placeholders, and its identity and storage values are explicit `replace-with-...` entries.
+- The Azure Blob adapter is verified against Azurite (the official emulator), not a real storage account; managed-identity SAS signing is not implemented.
+- `backupctl` covers S3-compatible endpoints only and is not wired into a scheduler or retention policy. It is an operator drill, not a managed backup service.
 
 ---
 
