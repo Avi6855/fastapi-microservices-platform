@@ -25,6 +25,7 @@ default-groups = ["dev"]
 # fixed release; parents accept it within their existing ranges.
 constraint-dependencies = [
   "certifi>=2026.10.19",
+  "filelock>=4.2.1",
   "opentelemetry-api>=1.45.1",
   "pillow>=13.0.0",
   "pyjwt>=2.15.0",
