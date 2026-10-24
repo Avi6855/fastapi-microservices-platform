@@ -47,7 +47,7 @@ services:
       retries: 12
 
   rabbitmq:
-    image: rabbitmq:4.3.5-management
+    image: rabbitmq:4.4.0-management
     environment:
       RABBITMQ_DEFAULT_USER: platform
       RABBITMQ_DEFAULT_PASS: platform-local-only
