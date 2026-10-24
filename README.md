@@ -4,7 +4,7 @@
 
 **A production-shaped, event-driven e-commerce backend delivered as 13 independently deployable services.**
 
-Python 3.14 · FastAPI · PostgreSQL · Kafka · RabbitMQ · Redis · S3 · Azure · Kubernetes · Go
+Python 3.14 · Go · FastAPI · PostgreSQL · Kafka · RabbitMQ · Redis · S3 · Azure · Kubernetes
 
 [Overview](#overview) · [Architecture](#architecture) · [Services](#service-catalog) · [Quick start](#quick-start) · [Evidence](#engineering-competencies) · [Docs](#documentation)
 
